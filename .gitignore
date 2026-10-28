@@ -1,0 +1,42 @@
+# Environment variables and API keys
+.env
+.env.local
+.env.*.local
+
+# Internal documentation requested to exclude
+DESIGN.md
+design.md
+SPECIFICATION.md
+specification.md
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Large media files (exceeds GitHub 100MB limit)
+data/raw/**/*.mp4
+data/raw/**/*.mov
+data/raw/**/*.avi
+*.mp4
+*.mov
+
+# Local databases and vector index locks/storage
+qdrant_data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# IDE / System files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

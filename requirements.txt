@@ -1,0 +1,26 @@
+# Multimodal AI Tutor Dependencies
+
+# LLM & Generation
+groq>=1.7.0
+fastapi>=0.115.0
+gradio>=6.0.0
+pydantic>=2.10.0
+python-dotenv>=1.0.0
+
+# Vector Database & Retrieval
+qdrant-client>=1.12.0
+fastembed>=0.4.0
+sentence-transformers>=3.3.0
+torch>=2.2.0
+
+# Document & Video Ingestion
+pymupdf>=1.25.0
+opencv-python>=4.10.0
+numpy>=1.26.0
+pillow>=10.0.0
+webvtt-py>=0.4.6
+
+# Storage & Utilities
+aiosqlite>=0.20.0
+loguru>=0.7.0
+tqdm>=4.66.0
