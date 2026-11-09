@@ -1,6 +1,7 @@
 # Multimodal AI Tutor Dependencies
 
-# LLM & Generation
+# LLM, VLM & Gateway
+litellm>=1.50.0
 groq>=1.7.0
 fastapi>=0.115.0
 gradio>=6.0.0
