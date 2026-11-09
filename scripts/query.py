@@ -24,10 +24,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Query the Multimodal AI Tutor via CLI.")
     parser.add_argument("--query", "-q", type=str, required=True, help="Question to ask.")
     parser.add_argument("--config", "-c", type=str, default="A", choices=["A", "B"], help="Config profile (A or B)")
+    parser.add_argument("--course", type=str, default=None, help="Filter retrieval by Course ID (e.g. MIT_6.006)")
+    parser.add_argument("--lecture", type=str, default=None, help="Filter retrieval by Lecture ID (e.g. lecture-03)")
     args = parser.parse_args()
 
     service = TutorService()
-    result = service.answer_query(query=args.query, config=args.config)
+    result = service.answer_query(
+        query=args.query,
+        config=args.config,
+        course_id=args.course,
+        lecture_id=args.lecture,
+    )
 
     print("\n" + "=" * 60)
     print(f"QUERY: {args.query}")

@@ -8,6 +8,9 @@ of truth.
 import os
 from pathlib import Path
 
+# Disable remote cost map fetches in LiteLLM to ensure fast offline/sandboxed startup
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
+
 # ---------------------------------------------------------------------------
 # Project root & data directories
 # ---------------------------------------------------------------------------
@@ -16,16 +19,18 @@ DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 EVIDENCE_DIR = DATA_DIR / "evidence"
 FRAMES_DIR = EVIDENCE_DIR / "frames"
+FILTERED_FRAMES_DIR = EVIDENCE_DIR / "filtered_frames"
 SLIDES_DIR = EVIDENCE_DIR / "slides"
 QDRANT_PATH = str(PROJECT_ROOT / "qdrant_data")
 MEMORY_DB_PATH = str(DATA_DIR / "learner_memory.db")
 
 # ---------------------------------------------------------------------------
-# Collection & versioning
+# Multi-course defaults & versioning
 # ---------------------------------------------------------------------------
+DEFAULT_COURSE_ID = "mit-6.006"
 COLLECTION_NAME = "course_evidence"
 CONTENT_VERSION = "v1.0"
-EXTRACTION_METHOD = "whisperx+learnet_tib"
+EXTRACTION_METHOD = "whisperx+learnet_tib+vlm"
 ATTRIBUTION = "MIT OCW CC BY-NC-SA 4.0 - Prof. Erik Demaine"
 
 # ---------------------------------------------------------------------------
@@ -78,12 +83,33 @@ ABSTENTION_FULL_THRESHOLD = 0.65
 ABSTENTION_QUALIFIED_THRESHOLD = 0.45
 
 # ---------------------------------------------------------------------------
-# LLM / Groq API
+# LLM & VLM Model Configurations (Unified via LiteLLM)
 # ---------------------------------------------------------------------------
-GROQ_MODEL_QUALITY = "openai/gpt-oss-120b"   # Frontier 120B reasoning model on Groq
-GROQ_MODEL_SPEED = "qwen/qwen3.8-27b"        # Ultra-fast 27B instruction model on Groq (~520 tok/s)
+# Primary models (Groq)
+PRIMARY_LLM_MODEL = os.getenv("LLM_MODEL", "groq/openai/gpt-oss-120b")
+SPEED_LLM_MODEL = "groq/qwen/qwen3.8-27b"
+FALLBACK_LLM_MODELS = ["groq/openai/gpt-oss-20b", "groq/qwen/qwen3.8-27b"]
+
+# Vision-Language Models (VLM) for Keyframe and Slide Captioning
+PRIMARY_VLM_MODEL = os.getenv("VLM_MODEL", "groq/qwen/qwen3.8-27b")
+FALLBACK_VLM_MODELS = [
+    "groq/openai/gpt-oss-120b",
+    "groq/openai/gpt-oss-20b",
+]
+
+GROQ_MODEL_QUALITY = "openai/gpt-oss-120b"
+GROQ_MODEL_SPEED = "qwen/qwen3.8-27b"
 GROQ_MAX_TOKENS_A = 1200
 GROQ_MAX_TOKENS_B = 800
+
+# ---------------------------------------------------------------------------
+# Keyframe Refinement & Pedagogical Maturity Filter
+# ---------------------------------------------------------------------------
+# Controls the secondary pruning stage on raw LEARNet TIB keyframes
+KEYFRAME_TARGET_COUNT = 30         # Maximum mature keyframes to caption per lecture
+KEYFRAME_BLUR_THRESHOLD = 80.0     # Laplacian variance threshold (filters out motion blur)
+KEYFRAME_MIN_EDGE_DENSITY = 0.015  # Minimum Canny edge ratio for valid board/slide content
+KEYFRAME_DEDUP_SIM_THRESHOLD = 0.85 # SSIM dedup for adjacent mature frames
 
 # ---------------------------------------------------------------------------
 # Learner memory
@@ -103,6 +129,6 @@ SLIDE_DPI = 150
 # ---------------------------------------------------------------------------
 # Ensure data directories exist
 # ---------------------------------------------------------------------------
-for _dir in [DATA_DIR, RAW_DIR, EVIDENCE_DIR, FRAMES_DIR, SLIDES_DIR]:
+for _dir in [DATA_DIR, RAW_DIR, EVIDENCE_DIR, FRAMES_DIR, FILTERED_FRAMES_DIR, SLIDES_DIR]:
     _dir.mkdir(parents=True, exist_ok=True)
 

@@ -402,9 +402,13 @@ def build_video_multimodal_chunks(
     keyframes: List[Dict],
     source_id: str = "6.006-lec03-video",
     source_url: str = "https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/",
+    course_id: str = "MIT_6.006",
+    lecture_id: str = "lecture-03",
+    keyframe_captions: Optional[Dict[str, str]] = None,
 ) -> List[MultimodalChunk]:
-    """Align transcript chunks with nearest LEARNet keyframes and construct MultimodalChunks."""
+    """Align transcript chunks with nearest LEARNet keyframes, attach VLM captions, and construct MultimodalChunks."""
     multimodal_chunks: List[MultimodalChunk] = []
+    captions_map = keyframe_captions or {}
 
     for t_idx, t_chunk in enumerate(transcript_chunks):
         start_ms = t_chunk["start_ms"]
@@ -426,6 +430,11 @@ def build_video_multimodal_chunks(
         frame_path = aligned_kf["frame_path"] if aligned_kf else None
         frame_ts = aligned_kf["timestamp_ms"] if aligned_kf else None
 
+        # Look up VLM caption if this keyframe was captioned
+        visual_caption = ""
+        if frame_path and frame_path in captions_map:
+            visual_caption = captions_map[frame_path]
+
         evidence_id = f"ev-{source_id}-t-{start_ms}_{end_ms}"
         content_hash = hashlib.sha256(text_span.encode("utf-8")).hexdigest()
 
@@ -437,6 +446,8 @@ def build_video_multimodal_chunks(
             evidence_id=evidence_id,
             modality="transcript",
             status="active",
+            course_id=course_id,
+            lecture_id=lecture_id,
         )
 
         provenance = AlignmentProvenance(
@@ -446,14 +457,20 @@ def build_video_multimodal_chunks(
             frame_timestamp_ms=frame_ts,
             frame_asset_path=frame_path,
             transcript_span=text_span,
-            visual_caption="",
+            visual_caption=visual_caption,
         )
+
+        # Enrich text for embedding with visual blackboard context if available
+        if visual_caption:
+            embedding_text = f"{text_span}\n[Visual Blackboard Context]: {visual_caption}"
+        else:
+            embedding_text = text_span
 
         multimodal_chunks.append(
             MultimodalChunk(
                 identity=identity,
                 provenance=provenance,
-                text_for_embedding=text_span,
+                text_for_embedding=embedding_text,
                 extraction_method=EXTRACTION_METHOD,
             )
         )

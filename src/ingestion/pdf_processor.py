@@ -31,6 +31,8 @@ class PDFSlideProcessor:
         source_id: str = "6.006-lec03-notes",
         source_url: str = "https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/",
         prefix: str = "lec03",
+        course_id: str = "MIT_6.006",
+        lecture_id: str = "lecture-03",
     ) -> List[MultimodalChunk]:
         """Render slide pages to PNG and return MultimodalChunk evidence objects."""
         doc = pymupdf.open(str(pdf_path))
@@ -70,6 +72,8 @@ class PDFSlideProcessor:
                 evidence_id=evidence_id,
                 modality="slide",
                 status="active",
+                course_id=course_id,
+                lecture_id=lecture_id,
             )
 
             provenance = AlignmentProvenance(

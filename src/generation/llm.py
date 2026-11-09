@@ -1,9 +1,10 @@
-"""Grounded generation client using Groq API (Qwen 2.5 72B / Llama 3.3 70B).
+"""Grounded generation client using LiteLLMGateway.
 
 Enforces:
 1. Strict inline citation syntax: [claim_id | evidence_id]
 2. Strict adherence to retrieved course evidence context
 3. Configurable quality vs. speed profiles (Config A vs Config B)
+4. Dynamic rate-limit failover with automatic reset tracking
 """
 
 import logging
@@ -12,22 +13,22 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
-from groq import Groq
 
 from src.config import (
     GROQ_MAX_TOKENS_A,
     GROQ_MAX_TOKENS_B,
-    GROQ_MODEL_QUALITY,
-    GROQ_MODEL_SPEED,
+    PRIMARY_LLM_MODEL,
     PROJECT_ROOT,
+    SPEED_LLM_MODEL,
 )
+from src.generation.gateway import LiteLLMGateway
 
 # Load environment variables from .env if present
 load_dotenv(PROJECT_ROOT / ".env")
 
 logger = logging.getLogger(__name__)
 
-TUTOR_SYSTEM_PROMPT = """You are the Grounded Multimodal AI Tutor for MIT 6.006 (Introduction to Algorithms, Spring 2020).
+TUTOR_SYSTEM_PROMPT = """You are the Grounded Multimodal AI Tutor for university computer science courses (including MIT 6.006).
 
 CRITICAL PEDAGOGICAL & GROUNDING RULES:
 1. You must answer the student's question accurately using ONLY the provided Course Evidence context.
@@ -45,23 +46,21 @@ CRITICAL PEDAGOGICAL & GROUNDING RULES:
 
 
 class GroundedGenerator:
-    """Wraps the Groq Cloud API for frontier open-source LLM generation."""
+    """Wraps LiteLLMGateway for grounded pedagogical explanation generation."""
 
-    def __init__(self, api_key: Optional[str] = None) -> None:
-        self.api_key = api_key or os.getenv("GROQ_API_KEY")
-        if not self.api_key:
-            logger.warning(
-                "GROQ_API_KEY is not set. LLM generation calls will fail until the key is provided."
-            )
-            self.client = None
-        else:
-            self.client = Groq(api_key=self.api_key)
+    def __init__(
+        self,
+        gateway: Optional[LiteLLMGateway] = None,
+        api_key: Optional[str] = None,
+    ) -> None:
+        if api_key:
+            os.environ["GROQ_API_KEY"] = api_key
+        self.gateway = gateway or LiteLLMGateway()
 
     def set_api_key(self, api_key: str) -> None:
-        """Dynamically update the Groq API key."""
-        self.api_key = api_key
-        self.client = Groq(api_key=api_key)
-        logger.info("Groq API key updated successfully.")
+        """Update API key in the environment for LiteLLM."""
+        os.environ["GROQ_API_KEY"] = api_key
+        logger.info("API key updated for generation.")
 
     def generate_response(
         self,
@@ -70,25 +69,8 @@ class GroundedGenerator:
         learner_profile: Optional[Dict] = None,
         config: str = "A",
     ) -> str:
-        """Generate a grounded, cited pedagogical explanation.
-
-        Parameters
-        ----------
-        query:
-            Student inquiry.
-        context_block:
-            Formatted evidence block from Retriever.
-        learner_profile:
-            Optional active student memory profile attributes.
-        config:
-            'A' selects Qwen 2.5 72B (Quality), 'B' selects Llama 3.3 70B (Speed).
-        """
-        if not self.client:
-            return (
-                "⚠️ Groq API key is missing. Please set your GROQ_API_KEY in the environment or .env file to enable tutor generation."
-            )
-
-        model_name = GROQ_MODEL_QUALITY if config.upper() == "A" else GROQ_MODEL_SPEED
+        """Generate a grounded, cited pedagogical explanation."""
+        model_name = PRIMARY_LLM_MODEL if config.upper() == "A" else SPEED_LLM_MODEL
         max_tokens = GROQ_MAX_TOKENS_A if config.upper() == "A" else GROQ_MAX_TOKENS_B
 
         profile_str = ""
@@ -98,20 +80,19 @@ class GroundedGenerator:
                 profile_lines.append(f"- {k.capitalize()}: {v}")
             profile_str = "\n".join(profile_lines) + "\n\n"
 
-        user_content = f"{profile_str}Course Evidence Context:\n{context_block}\n\nStudent Question:\n{query}\n\nProvide your cited explanation:"
+        user_content = (
+            f"{profile_str}Course Evidence Context:\n{context_block}\n\n"
+            f"Student Question:\n{query}\n\nProvide your cited explanation:"
+        )
 
         try:
-            response = self.client.chat.completions.create(
+            return self.gateway.complete(
+                prompt=user_content,
+                system_prompt=TUTOR_SYSTEM_PROMPT,
                 model=model_name,
-                messages=[
-                    {"role": "system", "content": TUTOR_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
-                ],
-                temperature=0.2,  # Low temperature for deterministic grounding
                 max_tokens=max_tokens,
+                temperature=0.1,
             )
-            return response.choices[0].message.content or ""
         except Exception as e:
-            logger.exception("Groq LLM generation error: %s", e)
+            logger.exception("LLM generation error: %s", e)
             return f"⚠️ Generation error: {e}"
-

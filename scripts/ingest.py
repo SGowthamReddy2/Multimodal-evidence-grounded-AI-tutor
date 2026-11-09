@@ -1,4 +1,4 @@
-"""CLI runner for ingesting lecture assets into the Multimodal AI Tutor."""
+"""CLI runner for ingesting multi-course lecture assets into the Multimodal AI Tutor."""
 
 import argparse
 import logging
@@ -8,8 +8,16 @@ from pathlib import Path
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.config import RAW_DIR
-from src.ingestion.pipeline import IngestionPipeline
+# Ensure Windows terminal prints unicode mathematical symbols without charmap errors
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+from src.config import DEFAULT_COURSE_ID, RAW_DIR
+from src.ingestion.pipeline import (
+    IngestionPipeline,
+    discover_courses_and_lectures,
+    resolve_lecture_dir,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,31 +32,50 @@ def main() -> None:
         "--lecture-dir",
         type=str,
         default=None,
-        help="Path to specific lecture folder (e.g. data/raw/lecture-03)",
+        help="Path or name of specific lecture folder (e.g. data/raw/mit-6.006/lecture-03, mit-6.006/lecture-03, or lecture-03)",
+    )
+    parser.add_argument(
+        "--course",
+        type=str,
+        default=DEFAULT_COURSE_ID,
+        help=f"Course identifier (default: {DEFAULT_COURSE_ID})",
+    )
+    parser.add_argument(
+        "--lecture",
+        type=str,
+        default=None,
+        help="Lecture identifier (e.g. lecture-03)",
+    )
+    parser.add_argument(
+        "--no-vlm",
+        action="store_true",
+        help="Disable VLM image captioning (skips API calls)",
     )
     parser.add_argument(
         "--auto",
         action="store_true",
-        help="Scan and ingest all lecture-* folders in data/raw/",
+        help="Auto-discover and ingest all courses and lectures in data/raw/",
     )
     args = parser.parse_args()
 
     pipeline = IngestionPipeline()
+    enable_vlm = not args.no_vlm
 
-    if args.lecture_dir:
-        target_dir = Path(args.lecture_dir)
-        pipeline.ingest_lecture(target_dir, lecture_id=target_dir.name)
-    elif args.auto or True:
-        # Default to auto scanning if no specific dir provided
-        lecture_dirs = sorted(list(RAW_DIR.glob("lecture-*")))
-        if not lecture_dirs:
-            logger.error("No lecture-* directories found in %s", RAW_DIR)
-            sys.exit(1)
-        for l_dir in lecture_dirs:
-            logger.info("Auto-ingesting %s...", l_dir.name)
-            pipeline.ingest_lecture(l_dir, lecture_id=l_dir.name)
+    if args.lecture_dir or args.lecture:
+        raw_target = args.lecture_dir or args.lecture
+        target_dir = resolve_lecture_dir(raw_target, course_id=args.course)
+        lec_id = args.lecture or target_dir.name
+        pipeline.ingest_lecture(
+            lecture_dir=target_dir,
+            course_id=args.course,
+            lecture_id=lec_id,
+            enable_vlm=enable_vlm,
+        )
+    else:
+        # Default: auto-discover and ingest all courses & lectures
+        logger.info("Auto-discovering courses and lectures in %s...", RAW_DIR)
+        pipeline.ingest_all(base_dir=RAW_DIR, enable_vlm=enable_vlm)
 
 
 if __name__ == "__main__":
     main()
-

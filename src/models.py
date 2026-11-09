@@ -21,6 +21,8 @@ class EvidenceIdentity:
     evidence_id: str         # Globally unique identifier (e.g., 'ev-lec03-t-142000_165000')
     modality: Literal["transcript", "slide", "keyframe", "reading", "code"]
     status: Literal["active", "superseded"] = "active"
+    course_id: str = "MIT_6.006"   # Course identifier for multi-course scaling
+    lecture_id: str = "lecture-03" # Lecture identifier for multi-lecture scaling
 
 
 @dataclass
@@ -58,6 +60,8 @@ class MultimodalChunk:
             "content_version": self.identity.content_version,
             "content_hash": self.identity.content_hash,
             "evidence_id": self.identity.evidence_id,
+            "course_id": self.identity.course_id,
+            "lecture_id": self.identity.lecture_id,
             "modality": self.identity.modality,
             "status": self.identity.status,
             "start_ms": self.provenance.start_ms,
@@ -90,6 +94,8 @@ class RetrievedEvidence:
     slide_asset_path: Optional[str] = None
     page_number: Optional[int] = None
     source_id: str = ""
+    course_id: str = "MIT_6.006"
+    lecture_id: str = "lecture-03"
     status: str = "active"
     content_version: str = ""
 

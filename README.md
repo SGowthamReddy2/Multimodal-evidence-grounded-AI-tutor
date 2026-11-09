@@ -8,11 +8,13 @@
 ## 📌 Table of Contents
 1. [Overview & Core Value Proposition](#-overview--core-value-proposition)
 2. [Key Innovations & Technical Foundations](#-key-innovations--technical-foundations)
-   - [LEARNet Temporal Information Bottleneck (TIB)](#1-learnet-temporal-information-bottleneck-tib)
-   - [Hybrid Multi-Vector Retrieval & RRF Fusion](#2-hybrid-multi-vector-retrieval--rrf-fusion)
-   - [Deterministic Pre-Display Citation Gate](#3-deterministic-pre-display-citation-gate)
-   - [Tri-State Epistemic Abstention Policy](#4-tri-state-epistemic-abstention-policy)
-   - [Durable Learner Memory with Confirmation Gate](#5-durable-learner-memory-with-confirmation-gate)
+   - [1. LEARNet Temporal Information Bottleneck (TIB)](#1-learnet-temporal-information-bottleneck-tib)
+   - [2. Vision-Language Model (VLM) Extraction & LiteLLM Gateway](#2-vision-language-model-vlm-extraction--litellm-gateway)
+   - [3. Multi-Course & Multi-Lecture Architecture](#3-multi-course--multi-lecture-architecture)
+   - [4. Hybrid Multi-Vector Retrieval & RRF Fusion](#4-hybrid-multi-vector-retrieval--rrf-fusion)
+   - [5. Deterministic Pre-Display Citation Gate](#5-deterministic-pre-display-citation-gate)
+   - [6. Tri-State Epistemic Abstention Policy](#6-tri-state-epistemic-abstention-policy)
+   - [7. Durable Learner Memory with Confirmation Gate](#7-durable-learner-memory-with-confirmation-gate)
 3. [End-to-End System Process Workflow](#-end-to-end-system-process-workflow)
 4. [User Interface Overview (3-Pane Architecture)](#-user-interface-overview-3-pane-architecture)
 5. [Directory & Codebase Structure](#-directory--codebase-structure)
@@ -71,11 +73,35 @@ LEARNet models lecture video as an **Instructional Steady-State (ISS)**, using S
  [Pedagogically Significant Keyframes -> data/evidence/frames/]
 ```
 
-* **Outcome for MIT 6.006 Lecture 3**: From 95,171 raw video frames (52.9 minutes), TIB distilled **241 clean, high-resolution keyframes** capturing finished board derivations while ignoring instructor pacing.
+* **Outcome for MIT 6.006 Lecture 3**: From 95,171 raw video frames (52.9 minutes), TIB distilled **241 candidate keyframes** capturing board derivations while ignoring instructor pacing.
+
+#### Secondary Pedagogical Refinement & Blackboard Maturity Filter:
+To prevent API exhaustion and eliminate redundant/incomplete board states:
+1. **Sharpness Gate**: Discards motion-blurred and refocusing frames via Laplacian variance ($\text{Var} < 80.0$).
+2. **Edge Density Gate**: Filters out blank boards and empty instructor shots using Canny edge analysis ($\text{Density} < 0.015$).
+3. **Derivation Peak Selection**: Clusters temporally adjacent frames into visual scenes and selects the single frame with the highest board maturity (completed math derivation and diagrams).
+4. **Distillation Result**: Reduces 200–400 raw frames down to **~30 peak mature keyframes** per lecture, cutting VLM API calls by ~88% while retaining all critical diagrams and mathematical derivations.
 
 ---
 
-### 2. Hybrid Multi-Vector Retrieval & RRF Fusion
+### 2. Vision-Language Model (VLM) Extraction & LiteLLM Gateway
+Keyframes and slides are analyzed by **Qwen 2.5 27B / GPT-OSS 120B** via a unified **LiteLLM Gateway**:
+* **Pedagogical Visual Prompting**: Transcribes mathematical formulas, asymptotic bounds, data structures, and recursion trees directly from blackboard images.
+* **Semantic Vector Enrichment**: Ingests visual captions directly into the dense and sparse search indices (`text_for_embedding`), enabling text queries to match visual diagrams that the lecturer did not speak aloud.
+* **Persistent Disk Cache**: Caches VLM descriptions in `data/evidence/vlm_captions_cache.json` by image SHA-256 hash to eliminate redundant API calls across ingestion runs.
+* **Rate-Limit Resilience & Reset Window Tracking**: Automatically catches 429 rate limits, parses `retry-after` / `x-ratelimit-reset` headers, routes traffic to secondary fallback models (e.g. `openai/gpt-oss-120b`, `openai/gpt-oss-20b`), and automatically restores the primary model as soon as its reset window clears.
+
+---
+
+### 3. Multi-Course & Multi-Lecture Architecture
+The tutor scales across multiple courses and multiple video lectures:
+* **Hierarchical Storage**: Supports `data/raw/<course_id>/<lecture_id>/` (with fallback to legacy flat lecture directories).
+* **Scoped Multi-Vector Retrieval**: Qdrant vectors carry indexed `course_id` and `lecture_id` payloads. Students can query across a **single lecture**, an **entire course**, or **all enrolled courses**.
+* **Dynamic Frontend Switching**: Interactive Gradio 6 dropdowns dynamically mount the active lecture's video and scope the evidence retrieval pipeline.
+
+---
+
+### 4. Hybrid Multi-Vector Retrieval & RRF Fusion
 The system embeds every evidence chunk into three complementary vector spaces within a single **embedded Qdrant** collection (`course_evidence`):
 
 1. **Dense Semantic Vector (768d)**: `BAAI/bge-base-en-v1.5` for broad conceptual matching.
@@ -90,7 +116,7 @@ The top 20 fused candidates are rescored using **`cross-encoder/ms-marco-MiniLM-
 
 ---
 
-### 3. Deterministic Pre-Display Citation Gate
+### 5. Deterministic Pre-Display Citation Gate
 Before any generated response reaches the user, it passes through `CitationValidator`:
 * Parses all citation tokens `[claim_id | evidence_id]`.
 * Confirms the `evidence_id` exists in Qdrant storage.
@@ -101,7 +127,7 @@ Before any generated response reaches the user, it passes through `CitationValid
 
 ---
 
-### 4. Tri-State Epistemic Abstention Policy
+### 6. Tri-State Epistemic Abstention Policy
 To eliminate ungrounded hallucinations, the system evaluates the top retrieval score $S$:
 * **State 1: Full Answer ($S \ge 0.65$)**: Sufficient course grounding found; generates full explanation with inline citations.
 * **State 2: Qualified Hedge ($0.45 \le S < 0.65$)**: Partial evidence found; prepends a warning badge indicating moderate confidence.
@@ -110,7 +136,7 @@ To eliminate ungrounded hallucinations, the system evaluates the top retrieval s
 
 ---
 
-### 5. Durable Learner Memory with Confirmation Gate
+### 7. Durable Learner Memory with Confirmation Gate
 Managed by SQLite in Write-Ahead Logging (WAL) mode (`data/learner_memory.db`):
 * **Memory Schema**: Tracks `goal`, `mastery`, `misconception`, and `preference`.
 * **Confirmation Gate**: Insights inferred by the tutor are marked `tutor_proposed`. They become active only after the student confirms them in the UI (`student_confirmed`).
@@ -130,11 +156,11 @@ sequenceDiagram
     participant Mem as 🧠 LearnerMemory (SQLite WAL)
     participant Ret as 🔍 HybridRetriever
     participant Qd as 🗄️ Qdrant ('course_evidence')
-    participant LLM as 🤖 Groq LLM (gpt-oss-120b / qwen3.8-27b)
-    participant Gate as 🛡️ CitationValidator
+    participant Gate as 🚪 LiteLLMGateway (LLM & VLM)
+    participant Val as 🛡️ CitationValidator
 
     Student->>UI: Enters query ("How does merge sort divide work?")
-    UI->>Svc: answer_query(query, learner_id, config="A")
+    UI->>Svc: answer_query(query, learner_id, config="A", course_id, lecture_id, scope)
     
     rect rgb(240, 248, 255)
         Note over Svc,Mem: Step 1: Memory Context Retrieval
@@ -143,33 +169,34 @@ sequenceDiagram
     end
 
     rect rgb(245, 255, 245)
-        Note over Svc,Qd: Step 2: Multi-Vector Hybrid Search
-        Svc->>Ret: retrieve(query, config="A")
-        Ret->>Ret: Embed dense, sparse (BM25), visual (CLIP)
-        Ret->>Qd: Prefetch(dense, sparse, visual) + RRF (k=30)
-        Qd-->>Ret: Top 20 Candidates
+        Note over Svc,Qd: Step 2: Scoped Multi-Vector Hybrid Search
+        Svc->>Ret: retrieve(query, config="A", course_id, lecture_id)
+        Ret->>Ret: Embed dense (BGE-v1.5), sparse (BM25), visual (CLIP)
+        Ret->>Qd: Prefetch(dense, sparse, visual) + Payload Filter + RRF (k=30)
+        Qd-->>Ret: Top 20 Scoped Candidates
         Ret->>Ret: Cross-Encoder Rerank (ms-marco-MiniLM-L-6-v2)
         Ret-->>Svc: Top 5 Scored Evidence Items
     end
 
     rect rgb(255, 250, 240)
-        Note over Svc,Gate: Step 3: Abstention Evaluation
+        Note over Svc,Gate: Step 3: Epistemic Abstention & Generation Gateway
         alt Top Score < 0.45 (Off-Corpus)
-            Svc-->>UI: Return Explicit Abstention (No LLM call)
+            Svc-->>UI: Return Explicit Abstention (Zero LLM spend)
         else Top Score >= 0.45 (Grounded)
-            Svc->>LLM: Prompt Context + Learner Profile + Query
-            LLM-->>Svc: Response with [claim_id | evidence_id]
-            Svc->>Gate: validate(raw_response)
-            Gate->>Qd: Check evidence existence & active status
-            Gate-->>Svc: ValidationResult (Sanitized & Verified)
-            Svc-->>UI: Verified Response + Badges + Aligned Timestamp
+            Svc->>Gate: generate_text(prompt, config="A")
+            Note over Gate: Auto rate-limit tracking (reset <= 35s pause or fallback)
+            Gate-->>Svc: Response with [claim_id | evidence_id]
+            Svc->>Val: validate(raw_response)
+            Val->>Qd: Check evidence existence, active status & local assets
+            Val-->>Svc: ValidationResult (Sanitized & Verified)
+            Svc-->>UI: Verified Response + Badges + Human Timestamp (MM:SS)
         end
     end
 
     UI->>Student: Displays Answer + Citation Badges + Media Preview
     opt Student seeks video
         Student->>UI: Clicks "Play Cited Moment"
-        UI->>UI: Video Player jumps to exact timestamp (e.g. 2670.02s)
+        UI->>UI: Client JS jumps video DOM to exact timecode (e.g. 44:30)
     end
 ```
 
@@ -180,18 +207,21 @@ sequenceDiagram
 Built with **Gradio 6**, the web interface provides an integrated pedagogical workspace:
 
 ```
-┌──────────────────────────────────────────────┬──────────────────────────────────────────────┐
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 🎓 Grounded Multimodal AI Tutor                                                             │
+│ [Course: mit-6.006 ▼]  [Lecture: lecture-03 ▼]  Scope: (•) Current Lecture ( ) Entire ( ) All│
+├──────────────────────────────────────────────┬──────────────────────────────────────────────┤
 │                  LEFT PANE                   │                  RIGHT PANE                  │
 │             💬 Tutor Dialogue                │        [📺 Media Viewer]  [🧠 Memory]        │
 ├──────────────────────────────────────────────┼──────────────────────────────────────────────┤
 │                                              │ 🎥 Synchronized Lecture Video Player         │
 │  🧑‍🎓 Student: How does merge sort work?       │    [▶️ 00:44:30 / 00:52:55]                 │
-│                                              │    Aligned Timestamp: 2670.02s               │
+│                                              │    Aligned Moment: 44:30 (44m 30s)           │
 │  🎓 Tutor: Merge sort divides the array in   │    [⚡ Play Cited Moment]                     │
 │  half recursively [c1 | ev-notes-p5] and     ├──────────────────────────────────────────────┤
 │  merges sorted lists in linear time          │ 🖼️ Visual Evidence (Slide / Board Keyframe)  │
 │  [c2 | ev-video-t-2670020_2715142].          │    ┌──────────────────────────────────────┐  │
-│                                              │    │  [Slide 5: Merge Sort Algorithm]     │  │
+│                                              │    │  [Mature Board Derivation: Slide 5]  │  │
 │  🟢 Decision: FULL ANSWER (Conf: 1.311)      │    └──────────────────────────────────────┘  │
 │                                              ├──────────────────────────────────────────────┤
 │  [Ask a question...] [Submit] [Clear]        │ 🔍 Top-K Retrieved Evidence Candidates      │
@@ -200,17 +230,21 @@ Built with **Gradio 6**, the web interface provides an integrated pedagogical wo
 └──────────────────────────────────────────────┴──────────────────────────────────────────────┘
 ```
 
-1. **Left Pane (Chat Workspace)**:
+1. **Top Scope & Navigation Bar**:
+   * Dynamic **Course Selector** (`mit-6.006`, etc.) and **Lecture Selector** (`lecture-03`, `lecture-04`) discovered directly from `data/raw/`.
+   * **Retrieval Scope Switcher**: Narrow queries to *"Current Lecture"*, expand to *"Entire Course"*, or search across *"All Courses"*.
+2. **Left Pane (Chat Workspace)**:
    * Interactive chat stream with Markdown and LaTeX equation rendering.
    * Real-time **Decision Status Badge** (`FULL ANSWER`, `QUALIFIED HEDGE`, `EXPLICIT ABSTENTION`).
    * Config switcher: **Config A (Quality-Optimized)** vs. **Config B (Speed-Optimized)**.
-2. **Right Top Pane (Media & Evidence Viewer)**:
-   * HTML5 video player preloaded with Lecture 3.
-   * **Play Cited Moment** button automatically seeks playback to the evidence timestamp.
-   * Visual evidence inspector displays high-resolution slide PNGs or LEARNet blackboard keyframes.
-3. **Right Bottom Pane (Learner Memory Governance)**:
+3. **Right Top Pane (Media & Evidence Viewer)**:
+   * HTML5 video player dynamically mounted to active lecture video.
+   * **Play Cited Moment** button automatically seeks playback to the evidence timestamp via client-side JavaScript (`SEEK_VIDEO_JS`).
+   * Visual evidence inspector displays high-resolution slide PNGs or mature filtered blackboard keyframes from `data/evidence/filtered_frames/`.
+   * Dual timestamp formatting: readable minutes & seconds (`44:30 (44m 30s)`) in UI alongside precise millisecond seeking.
+4. **Right Bottom Pane (Learner Memory Governance)**:
    * Interactive table displaying active student profile attributes.
-   * Form to manually add, edit, or delete memory records.
+   * Form to manually add, edit, or delete memory records under student governance.
 
 ---
 
@@ -220,13 +254,20 @@ Built with **Gradio 6**, the web interface provides an integrated pedagogical wo
 Project - Multimodal AI Tutor/
 ├── data/
 │   ├── raw/
-│   │   └── lecture-03/
-│   │       ├── 6d1ae5278d02bbecb5c4428928b24194_MIT6_006S20_lec3.pdf  # Slide notes
-│   │       ├── MIT6_006S20_02_11_Lecture_3_300k.mp4                  # Full lecture video
-│   │       └── subtitles.vtt                                         # Extracted WebVTT cues
+│   │   └── mit-6.006/                  # Hierarchical course package
+│   │       ├── lecture-03/
+│   │       │   ├── *.pdf               # Slide notes
+│   │       │   ├── *.mp4               # Full lecture video
+│   │       │   └── subtitles.vtt       # Extracted WebVTT cues
+│   │       └── lecture-04/
+│   │           ├── *.pdf
+│   │           ├── *.mp4
+│   │           └── subtitles.vtt
 │   ├── evidence/
-│   │   ├── frames/             # 241 high-res keyframes extracted via LEARNet TIB
-│   │   └── slides/             # 6 high-res 150 DPI slide PNGs rendered via PyMuPDF
+│   │   ├── frames/             # Raw keyframes extracted via LEARNet TIB
+│   │   ├── filtered_frames/    # Mature, high-information keyframes filtered by keyframe_filter.py
+│   │   ├── slides/             # 6 high-res 150 DPI slide PNGs rendered via PyMuPDF
+│   │   └── vlm_captions_cache.json # SHA-256 keyed cache of VLM blackboard & slide descriptions
 │   ├── benchmark_queries.json  # 20 labelled evaluation queries (authored by user)
 │   └── learner_memory.db       # SQLite WAL database for durable student profiles
 │
@@ -241,15 +282,18 @@ Project - Multimodal AI Tutor/
 │   ├── ingestion/              # Ingestion & preprocessing subsystem
 │   │   ├── embedder.py         # FastEmbed multi-vector generator (BGE + BM25 + CLIP)
 │   │   ├── video_processor.py  # LEARNet TIB Keyframe Extractor & Subtitle Chunker
+│   │   ├── keyframe_filter.py  # Pedagogical Maturity Refiner (Laplacian blur & Canny edge density)
+│   │   ├── vlm_captioner.py    # VLM visual analyzer (Qwen 2.5 27B) with disk caching
 │   │   ├── pdf_processor.py    # PyMuPDF 150 DPI Slide Renderer & Text Extractor
-│   │   └── pipeline.py         # End-to-end ingestion pipeline orchestrator
+│   │   └── pipeline.py         # End-to-end multi-course ingestion pipeline orchestrator
 │   │
 │   ├── retrieval/              # Multi-channel retrieval subsystem
 │   │   ├── retriever.py        # Hybrid multi-vector prefetch + RRF + Cross-Encoder
 │   │   └── formatter.py        # Prompt context & UI badge formatting
 │   │
 │   ├── generation/             # Grounding & policy subsystem
-│   │   ├── llm.py              # Groq API client (gpt-oss-120b / qwen3.8-27b)
+│   │   ├── gateway.py          # Unified LiteLLM client with rate-limit tracking & fallback
+│   │   ├── llm.py              # Grounded generation engine with inline citations
 │   │   ├── validator.py        # Pre-display citation verification gate
 │   │   └── abstention.py       # Tri-state epistemic abstention policy
 │   │
@@ -261,6 +305,7 @@ Project - Multimodal AI Tutor/
 │
 ├── scripts/
 │   ├── ingest.py               # CLI runner for lecture ingestion
+│   ├── filter_keyframes.py     # Standalone CLI for keyframe refinement & filtering
 │   ├── query.py                # Terminal test tool for retrieval & answering
 │   └── app.py                  # Main Gradio web application launcher
 │
@@ -318,17 +363,47 @@ Query the tutor directly from PowerShell or Command Prompt:
 .venv\Scripts\python scripts/query.py -q "Who was the first emperor of Rome?"
 ```
 
-### B. Ingesting Additional Lectures
-To ingest another lecture (e.g., `data/raw/lecture-04`):
-1. Place `lecture.mp4` and `notes.pdf` into `data/raw/lecture-04/`.
+### B. Ingesting Additional Lectures & Courses
+To ingest an entire course or specific lecture:
+1. Place `lecture.mp4`, `notes.pdf`, and optionally `subtitles.vtt` into hierarchical course folders:
+   ```
+   data/raw/
+   └── <course_id>/          # e.g., mit-6.006
+       ├── lecture-03/
+       │   ├── *.pdf         # Slide notes
+       │   ├── *.mp4         # Full lecture video
+       │   └── subtitles.vtt # Extracted WebVTT subtitles
+       └── lecture-04/
+           ├── *.pdf
+           ├── *.mp4
+           └── subtitles.vtt
+   ```
 2. Run the ingestion runner:
    ```powershell
-   .venv\Scripts\python scripts/ingest.py --lecture-dir "data/raw/lecture-04"
-   ```
-   Or auto-scan all folders:
-   ```powershell
+   # Auto-discover and ingest all courses & lectures in data/raw/
    .venv\Scripts\python scripts/ingest.py --auto
+
+   # Ingest a specific lecture package (path resolution automatically handles
+   # paths whether run from the project root or inside the scripts/ directory):
+   .venv\Scripts\python scripts/ingest.py --lecture-dir "data/raw/mit-6.006/lecture-03" --course "mit-6.006" --lecture "lecture-03"
+
+   # Shorthand invocation by lecture folder name:
+   .venv\Scripts\python scripts/ingest.py --lecture "lecture-03"
+
+   # Run fast ingestion without VLM calls (text & CLIP only, skipping VLM API calls):
+   .venv\Scripts\python scripts/ingest.py --auto --no-vlm
    ```
+
+### C. Standalone Keyframe Filtering
+Filter raw keyframes to extract high-information, mature blackboard and slide frames without running the full ingestion pipeline:
+
+```powershell
+# Filter raw frames from data/evidence/frames into data/evidence/filtered_frames
+.venv\Scripts\python scripts/filter_keyframes.py
+
+# Or customize target count, blur threshold, and edge density:
+.venv\Scripts\python scripts/filter_keyframes.py --input-dir "data/evidence/frames" --output-dir "data/evidence/filtered_frames" --max-count 30
+```
 
 ---
 
@@ -338,13 +413,13 @@ To ingest another lecture (e.g., `data/raw/lecture-04`):
 
 | Milestone | Description | Status | Implementation Reference |
 |---|---|---|---|
-| **M1** | Multimodal Data Ingestion & Alignment | ✅ Complete | [`video_processor.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ingestion/video_processor.py), [`pdf_processor.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ingestion/pdf_processor.py) |
-| **M2** | Multi-Channel Hybrid Retrieval & RRF | ✅ Complete | [`retriever.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/retrieval/retriever.py) ($k=30$, named vectors) |
-| **M3** | Second-Accurate Verifiable Citations | ✅ Complete | [`validator.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/validator.py) (`[claim_id \| evidence_id]`) |
-| **M4** | Multimodal Grounding (Slides & Boards)| ✅ Complete | PyMuPDF slides + LEARNet TIB keyframes |
-| **M5** | Selective Learner Memory & Governance | ✅ Complete | [`controller.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/memory/controller.py) (Confirmation Gate, CRUD) |
-| **M6** | Calibrated Epistemic Abstention | ✅ Complete | [`abstention.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/abstention.py) (Tri-state thresholds) |
-| **UI** | 3-Pane Interactive Web Frontend | ✅ Complete | [`app.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ui/app.py) (Gradio 6 layout) |
+| **M1** | Multimodal Data Ingestion & Alignment | ✅ Complete | [`pipeline.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ingestion/pipeline.py), [`video_processor.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ingestion/video_processor.py), [`keyframe_filter.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ingestion/keyframe_filter.py), [`pdf_processor.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ingestion/pdf_processor.py) |
+| **M2** | Multi-Channel Hybrid Retrieval & RRF | ✅ Complete | [`retriever.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/retrieval/retriever.py) ($k=30$, named vectors), [`storage.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/storage.py) (scoped `course_id`/`lecture_id` payload filters) |
+| **M3** | Second-Accurate Verifiable Citations | ✅ Complete | [`validator.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/validator.py) (`[claim_id \| evidence_id]`), [`llm.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/llm.py) |
+| **M4** | Multimodal Grounding (Slides & Boards)| ✅ Complete | [`vlm_captioner.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ingestion/vlm_captioner.py) (Qwen 2.5 27B), [`gateway.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/gateway.py) (LiteLLM rate-limit tracker & cooldown restore) |
+| **M5** | Selective Learner Memory & Governance | ✅ Complete | [`controller.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/memory/controller.py) (Confirmation Gate, CRUD, exponential decay) |
+| **M6** | Calibrated Epistemic Abstention | ✅ Complete | [`abstention.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/abstention.py) (Tri-state thresholds: 0.65 / 0.45) |
+| **UI** | 3-Pane Interactive Web Frontend | ✅ Complete | [`app.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ui/app.py) (Gradio 6 layout, dynamic course/lecture dropdowns, scope selectors, JavaScript video DOM seek) |
 | **M7** | Automated Evaluation Harness | ⏸️ On Hold | Awaiting user's `data/benchmark_queries.json` |
 | **M8** | Config A vs Config B Pareto Analysis | ⏸️ On Hold | Prepared in Component 12; awaiting query dataset |
 | **Comp 7**| RAG-Anything Graph Trial | ⏸️ On Hold | Kept on hold per user instruction |
@@ -358,5 +433,5 @@ The evaluation harness requires 20 labelled prospective queries authored in `dat
 * **2 Stale-Source Invalidation**
 * **2 Adversarial Prompt Injection**
 
-*(See Section 6.1 in [DESIGN.md](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/DESIGN.md#L403-L430) for schema details and worked examples).*
+*(See Section 6.1 in [DESIGN.md](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/DESIGN.md#L513-L577) for schema details and worked examples).*
 

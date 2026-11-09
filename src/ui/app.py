@@ -1,9 +1,10 @@
 """Minimal 3-Pane Gradio Interface for the Multimodal AI Tutor.
 
-Implements the specification:
-1. Left Pane: Interactive Chatbot Workspace with verified citation badges
-2. Right Top Pane: Synchronized Media Viewer (Video + Slide/Keyframe Image)
-3. Right Bottom Pane: Learner Memory Governance Panel (Student CRUD)
+Implements:
+1. Multi-Course & Multi-Lecture Dynamic Selection
+2. Left Pane: Interactive Chatbot Workspace with verified citation badges
+3. Right Top Pane: Synchronized Media Viewer (Scoped Video + Slide/Keyframe Image)
+4. Right Bottom Pane: Learner Memory Governance Panel (Student CRUD)
 """
 
 import logging
@@ -13,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 
-from src.config import DATA_DIR, FRAMES_DIR, PROJECT_ROOT, RAW_DIR, SLIDES_DIR
+from src.config import DATA_DIR, DEFAULT_COURSE_ID, FRAMES_DIR, PROJECT_ROOT, RAW_DIR, SLIDES_DIR
 from src.service import TutorService
 
 logger = logging.getLogger(__name__)
@@ -60,21 +61,71 @@ def format_timestamp_min_sec(ts_ms: Optional[int]) -> Tuple[str, float]:
     return f"{minutes:02d}:{seconds:02d} ({minutes}m {seconds:02d}s)", total_sec
 
 
+def find_lecture_video(course_id: str, lecture_id: str) -> Optional[str]:
+    """Locate the MP4 video file for a specific course and lecture."""
+    # 1. Check hierarchical directory: data/raw/<course_id>/<lecture_id>/*.mp4
+    p1 = RAW_DIR / course_id / lecture_id
+    if p1.exists():
+        vids = list(p1.glob("*.mp4"))
+        if vids:
+            return str(vids[0])
+
+    # 2. Check legacy flat directory: data/raw/<lecture_id>/*.mp4
+    p2 = RAW_DIR / lecture_id
+    if p2.exists():
+        vids = list(p2.glob("*.mp4"))
+        if vids:
+            return str(vids[0])
+
+    # 3. Fallback: check all mp4 in RAW_DIR
+    all_vids = list(RAW_DIR.rglob("*.mp4"))
+    if all_vids:
+        return str(all_vids[0])
+
+    return None
+
+
 def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
     """Construct the Gradio Blocks web application."""
     tutor_service = service or TutorService()
 
-    # Find primary video file in data/raw/lecture-03/
-    lec3_videos = list((RAW_DIR / "lecture-03").glob("*.mp4"))
-    default_video_path = str(lec3_videos[0]) if lec3_videos else None
+    # Discover available courses and lectures
+    available_courses_map = tutor_service.list_available_courses_and_lectures()
+    course_choices = sorted(list(available_courses_map.keys())) or [DEFAULT_COURSE_ID]
+    default_course = course_choices[0]
+    lecture_choices = available_courses_map.get(default_course, ["lecture-03"])
+    default_lecture = lecture_choices[0] if lecture_choices else "lecture-03"
 
-    with gr.Blocks(title="MIT 6.006 Multimodal AI Tutor") as demo:
+    initial_video_path = find_lecture_video(default_course, default_lecture)
+
+    with gr.Blocks(title="Multimodal Evidence-Grounded AI Tutor") as demo:
         gr.Markdown(
             """
-            # 🎓 Grounded Multimodal AI Tutor (MIT 6.006)
-            **Interactive Algorithm Tutor with Timestamp Citations, LEARNet Keyframes, and Selective Learner Memory**
+            # 🎓 Multimodal Evidence-Grounded AI Tutor
+            **Interactive Algorithm Tutor with Timestamp Citations, VLM Blackboard Extraction, and Selective Learner Memory**
             """
         )
+
+        # Multi-Course & Multi-Lecture Scope Bar
+        with gr.Row():
+            course_selector = gr.Dropdown(
+                choices=course_choices,
+                value=default_course,
+                label="📚 Course",
+                scale=4,
+            )
+            lecture_selector = gr.Dropdown(
+                choices=lecture_choices,
+                value=default_lecture,
+                label="🎥 Lecture",
+                scale=4,
+            )
+            scope_selector = gr.Radio(
+                choices=["Current Lecture", "Entire Course", "All Courses"],
+                value="Current Lecture",
+                label="🔍 Retrieval Scope",
+                scale=4,
+            )
 
         with gr.Row():
             # ==========================================================
@@ -90,7 +141,7 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
 
                 with gr.Row():
                     query_input = gr.Textbox(
-                        placeholder="Ask about Lecture 3 (e.g. 'How does merge sort recursion tree calculate work at each level?')",
+                        placeholder="Ask about the lecture (e.g. 'How does merge sort recursion tree calculate work at each level?')",
                         label="Student Question",
                         scale=8,
                         lines=2,
@@ -116,8 +167,8 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
                     with gr.Tab("📺 Media & Evidence Viewer"):
                         gr.Markdown("#### 🎥 Synchronized Lecture Player")
                         video_player = gr.Video(
-                            value=default_video_path,
-                            label="MIT 6.006 Lecture Video",
+                            value=initial_video_path,
+                            label="Lecture Video",
                             autoplay=False,
                             height=260,
                             elem_id="lecture_video_player",
@@ -182,7 +233,35 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
         # Reactive Event Handlers
         # --------------------------------------------------------------
 
-        def handle_query(user_query: str, chat_history: List[Dict], config_choice: str):
+        def on_course_change(selected_course: str):
+            mapping = tutor_service.list_available_courses_and_lectures()
+            lectures = mapping.get(selected_course, ["lecture-03"])
+            first_lec = lectures[0] if lectures else "lecture-03"
+            vid = find_lecture_video(selected_course, first_lec)
+            return gr.update(choices=lectures, value=first_lec), vid
+
+        def on_lecture_change(selected_course: str, selected_lecture: str):
+            return find_lecture_video(selected_course, selected_lecture)
+
+        course_selector.change(
+            on_course_change,
+            inputs=[course_selector],
+            outputs=[lecture_selector, video_player],
+        )
+        lecture_selector.change(
+            on_lecture_change,
+            inputs=[course_selector, lecture_selector],
+            outputs=[video_player],
+        )
+
+        def handle_query(
+            user_query: str,
+            chat_history: List[Dict],
+            config_choice: str,
+            course_choice: str,
+            lecture_choice: str,
+            scope_choice: str,
+        ):
             if not user_query.strip():
                 return (
                     chat_history,
@@ -197,11 +276,17 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
             chat_history = chat_history or []
             chat_history.append({"role": "user", "content": user_query})
 
+            # Determine course/lecture filtering scope
+            target_course = course_choice if scope_choice in ("Current Lecture", "Entire Course") else None
+            target_lecture = lecture_choice if scope_choice == "Current Lecture" else None
+
             # Call TutorService
             res = tutor_service.answer_query(
                 query=user_query,
                 learner_id="student_01",
                 config=config_code,
+                course_id=target_course,
+                lecture_id=target_lecture,
             )
 
             bot_reply = res["answer"]
@@ -261,7 +346,14 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
         # Connect events
         submit_btn.click(
             handle_query,
-            inputs=[query_input, chatbot, config_selector],
+            inputs=[
+                query_input,
+                chatbot,
+                config_selector,
+                course_selector,
+                lecture_selector,
+                scope_selector,
+            ],
             outputs=[
                 chatbot,
                 decision_badge,
@@ -273,7 +365,14 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
         )
         query_input.submit(
             handle_query,
-            inputs=[query_input, chatbot, config_selector],
+            inputs=[
+                query_input,
+                chatbot,
+                config_selector,
+                course_selector,
+                lecture_selector,
+                scope_selector,
+            ],
             outputs=[
                 chatbot,
                 decision_badge,
@@ -316,4 +415,3 @@ if __name__ == "__main__":
         server_port=7860,
         allowed_paths=allowed_dirs,
     )
-

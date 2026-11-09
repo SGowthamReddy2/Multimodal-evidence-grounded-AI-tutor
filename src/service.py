@@ -33,20 +33,38 @@ class TutorService:
         self.abstention_policy = AbstentionPolicy()
         self.memory = LearnerMemoryController()
 
+    def list_available_courses_and_lectures(self) -> Dict[str, List[str]]:
+        """Return dict of course_id -> list of lecture_ids from storage and raw directory."""
+        return self.storage.list_available_courses_and_lectures()
+
     def answer_query(
         self,
         query: str,
         learner_id: str = "student_01",
         config: str = "A",
+        course_id: Optional[str] = None,
+        lecture_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Execute end-to-end tutor query answering."""
-        logger.info("Answering query: '%s' (learner=%s, config=%s)", query, learner_id, config)
+        """Execute end-to-end tutor query answering with optional course/lecture scoping."""
+        logger.info(
+            "Answering query: '%s' (learner=%s, config=%s, course=%s, lecture=%s)",
+            query,
+            learner_id,
+            config,
+            course_id,
+            lecture_id,
+        )
 
         # 1. Fetch active learner profile
         profile = self.memory.get_active_profile(learner_id)
 
-        # 2. Retrieve multimodal evidence
-        evidence_list = self.retriever.retrieve(query=query, config=config)
+        # 2. Retrieve multimodal evidence scoped to course/lecture if provided
+        evidence_list = self.retriever.retrieve(
+            query=query,
+            config=config,
+            course_id=course_id,
+            lecture_id=lecture_id,
+        )
 
         # 3. Evaluate Abstention Policy
         decision, top_score = self.abstention_policy.evaluate(evidence_list)

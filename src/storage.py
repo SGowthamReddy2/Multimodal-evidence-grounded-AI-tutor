@@ -97,13 +97,16 @@ class QdrantStorageManager:
             logger.info("Created collection '%s'.", COLLECTION_NAME)
 
             # Payload indexes for fast filtered queries.
-            for field_name in ("status", "modality", "source_id", "evidence_id"):
-                self.client.create_payload_index(
-                    collection_name=COLLECTION_NAME,
-                    field_name=field_name,
-                    field_schema=PayloadSchemaType.KEYWORD,
-                )
-            logger.info("Payload indexes created for '%s'.", COLLECTION_NAME)
+            for field_name in ("status", "modality", "source_id", "evidence_id", "course_id", "lecture_id"):
+                try:
+                    self.client.create_payload_index(
+                        collection_name=COLLECTION_NAME,
+                        field_name=field_name,
+                        field_schema=PayloadSchemaType.KEYWORD,
+                    )
+                except Exception:
+                    pass
+            logger.info("Payload indexes ensured for '%s'.", COLLECTION_NAME)
 
         except Exception:
             logger.exception(
@@ -191,40 +194,25 @@ class QdrantStorageManager:
         top_k: int = 5,
         prefetch_limit: int = 50,
         use_reranker: bool = True,
+        filter_course_id: Optional[str] = None,
+        filter_lecture_id: Optional[str] = None,
     ) -> List[RetrievedEvidence]:
-        """Hybrid multi-vector search with server-side RRF fusion.
+        """Hybrid multi-vector search with server-side RRF fusion and course/lecture filtering."""
+        must_conditions = [
+            FieldCondition(
+                key="status", match=MatchValue(value="active")
+            )
+        ]
+        if filter_course_id:
+            must_conditions.append(
+                FieldCondition(key="course_id", match=MatchValue(value=filter_course_id))
+            )
+        if filter_lecture_id:
+            must_conditions.append(
+                FieldCondition(key="lecture_id", match=MatchValue(value=filter_lecture_id))
+            )
 
-        Executes prefetch queries on each named vector space, then fuses
-        candidates via Reciprocal Rank Fusion (RRF) on the server side.
-
-        Parameters
-        ----------
-        dense_query:
-            Dense embedding of the user query.
-        sparse_query:
-            BM25 sparse vector of the user query.
-        visual_query:
-            Optional CLIP text embedding for visual retrieval.
-        top_k:
-            Number of final results when *not* using a reranker.
-        prefetch_limit:
-            Number of candidates each vector space retrieves before fusion.
-        use_reranker:
-            If ``True``, return ``RERANK_TOP_N`` candidates (to be reranked
-            downstream); otherwise return ``top_k``.
-
-        Returns
-        -------
-        List[RetrievedEvidence]
-            Scored evidence chunks ordered by fused relevance.
-        """
-        active_filter = Filter(
-            must=[
-                FieldCondition(
-                    key="status", match=MatchValue(value="active")
-                )
-            ]
-        )
+        active_filter = Filter(must=must_conditions)
 
         prefetches: List[Prefetch] = [
             Prefetch(
@@ -357,6 +345,28 @@ class QdrantStorageManager:
             logger.exception("Failed to get collection info")
             return {"points_count": 0, "status": "unknown"}
 
+    def list_available_courses_and_lectures(self) -> Dict[str, List[str]]:
+        """Return a mapping of course_id -> list of distinct lecture_ids in the collection."""
+        try:
+            records, _ = self.client.scroll(
+                collection_name=COLLECTION_NAME,
+                limit=1000,
+                with_payload=["course_id", "lecture_id"],
+            )
+            mapping: Dict[str, set] = {}
+            for r in records:
+                p = r.payload or {}
+                c = p.get("course_id", "MIT_6.006")
+                l = p.get("lecture_id", "lecture-03")
+                if c not in mapping:
+                    mapping[c] = set()
+                mapping[c].add(l)
+            if not mapping:
+                return {"MIT_6.006": ["lecture-03"]}
+            return {c: sorted(list(lects)) for c, lects in mapping.items()}
+        except Exception:
+            return {"MIT_6.006": ["lecture-03"]}
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -378,6 +388,8 @@ class QdrantStorageManager:
             slide_asset_path=payload.get("slide_asset_path"),
             page_number=payload.get("page_number"),
             source_id=payload.get("source_id", ""),
+            course_id=payload.get("course_id", "MIT_6.006"),
+            lecture_id=payload.get("lecture_id", "lecture-03"),
             status=payload.get("status", "active"),
             content_version=payload.get("content_version", ""),
         )

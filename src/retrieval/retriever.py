@@ -45,21 +45,10 @@ class HybridRetriever:
         top_k: int = FINAL_TOP_K,
         config: str = "A",  # 'A' = Quality-Optimized, 'B' = Speed-Optimized
         include_visual: bool = True,
+        course_id: Optional[str] = None,
+        lecture_id: Optional[str] = None,
     ) -> List[RetrievedEvidence]:
-        """Retrieve top-K evidence chunks matching the student query.
-
-        Parameters
-        ----------
-        query:
-            Student inquiry text.
-        top_k:
-            Number of final evidence items to return (default 5).
-        config:
-            'A' (Quality) uses prefetch=50 and cross-encoder reranking.
-            'B' (Speed) uses prefetch=20 and skips reranking.
-        include_visual:
-            Whether to include cross-modal visual embedding in prefetch.
-        """
+        """Retrieve top-K evidence chunks matching the student query with optional course/lecture scoping."""
         is_config_a = config.upper() == "A"
         prefetch_limit = PREFETCH_LIMIT_A if is_config_a else PREFETCH_LIMIT_B
         use_reranker = is_config_a
@@ -69,7 +58,7 @@ class HybridRetriever:
             query=query, include_visual=include_visual
         )
 
-        # 2. Qdrant multi-vector prefetch & server-side RRF
+        # 2. Qdrant multi-vector prefetch & server-side RRF with optional course/lecture scope
         candidates = self.storage.search_multi_vector(
             dense_query=dense_vec,
             sparse_query=sparse_vec,
@@ -77,6 +66,8 @@ class HybridRetriever:
             top_k=top_k,
             prefetch_limit=prefetch_limit,
             use_reranker=use_reranker,
+            filter_course_id=course_id,
+            filter_lecture_id=lecture_id,
         )
 
         if not candidates:

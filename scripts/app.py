@@ -7,7 +7,14 @@ from pathlib import Path
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.config import DATA_DIR, FRAMES_DIR, PROJECT_ROOT, RAW_DIR, SLIDES_DIR
+from src.config import (
+    DATA_DIR,
+    FILTERED_FRAMES_DIR,
+    FRAMES_DIR,
+    PROJECT_ROOT,
+    RAW_DIR,
+    SLIDES_DIR,
+)
 from src.ui.app import build_app
 
 logging.basicConfig(
@@ -24,6 +31,7 @@ def main() -> None:
         str(PROJECT_ROOT),
         str(DATA_DIR),
         str(FRAMES_DIR),
+        str(FILTERED_FRAMES_DIR),
         str(SLIDES_DIR),
         str(RAW_DIR),
     ]
