@@ -25,7 +25,6 @@ __pycache__/
 data/raw/
 
 # Local databases and vector index locks/storage
-qdrant_data/
 data/fastembed_cache/
 *.db
 *.db-wal
