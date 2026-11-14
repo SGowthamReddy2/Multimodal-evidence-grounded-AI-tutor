@@ -26,8 +26,7 @@ data/raw/mit-6.006/*
 
 
 # Local databases and vector index locks/storage
-data/fastembed_cache/
-*.db
+data/fastembed_cache/*
 *.db-wal
 *.db-shm
 *.sqlite3
