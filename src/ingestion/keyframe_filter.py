@@ -1,14 +1,17 @@
-"""Pedagogical Keyframe Refiner & Blackboard Maturity Filter.
+"""Stratified CLIP Pedagogical Keyframe Refiner.
 
-Filters raw keyframes extracted by LEARNet TIB (200-400 frames down to 25-35 mature
-frames) before calling expensive Vision-Language Model (VLM) APIs.
-
-Filters out:
-1. Motion-blurred and out-of-focus camera transition frames (Laplacian variance).
-2. Empty blackboards, plain walls, and instructor talking-head frames with no content (Canny edge density).
-3. Incomplete intermediate chalkboard writing states by selecting the peak-information
-   mature state in each pedagogical scene cluster.
-4. Saves filtered mature keyframes to disk (data/evidence/filtered_frames/) with manifest metadata.
+Replaces heuristic Laplacian/Canny edge thresholds with a two-tier semantic pipeline:
+1. Zero-Shot Semantic Evaluation (FastEmbed CLIP ViT-B/32):
+   Computes cosine similarity against pedagogical prompts (math derivations, slides, diagrams)
+   versus non-pedagogical noise (talking heads, empty walls, motion blur) to derive a Net Pedagogical Score (NPS).
+2. Stratified Temporal Binning:
+   Partitions the lecture into fixed, non-overlapping temporal windows (e.g., 90s bins)
+   and selects the peak-information frame within each window. This completely eliminates
+   single-linkage cluster collapse and guarantees uniform coverage across the entire lecture.
+3. Consecutive Inter-Bin Deduplication (SSIM):
+   Removes static slides or unchanged boards that span across multiple temporal bins.
+4. Disk Persistence:
+   Saves mature pedagogical frames to data/evidence/filtered_frames/ alongside manifest metadata.
 """
 
 import argparse
@@ -20,24 +23,64 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-# Ensure project root is in sys.path if run directly
+# Ensure project root is in sys.path
 root_dir = Path(__file__).resolve().parent.parent.parent
 if str(root_dir) not in sys.path:
     sys.path.insert(0, str(root_dir))
 
 import cv2
 import numpy as np
+from fastembed import ImageEmbedding, TextEmbedding
 
 from src.config import (
+    CLIP_MODEL,
+    CLIP_TEXT_MODEL,
     FILTERED_FRAMES_DIR,
     FRAMES_DIR,
+    KEYFRAME_BIN_SIZE_S,
     KEYFRAME_BLUR_THRESHOLD,
+    KEYFRAME_CLIP_MIN_NET_SCORE,
     KEYFRAME_DEDUP_SIM_THRESHOLD,
-    KEYFRAME_MIN_EDGE_DENSITY,
     KEYFRAME_TARGET_COUNT,
 )
+from src.ingestion.video_processor import compute_ssim
 
 logger = logging.getLogger(__name__)
+
+# Global singletons for FastEmbed models to avoid reloading weights repeatedly
+_CLIP_IMG_EMBEDDER: Optional[ImageEmbedding] = None
+_CLIP_TEXT_EMBEDDER: Optional[TextEmbedding] = None
+_POS_TEXT_VECTORS: Optional[List[np.ndarray]] = None
+_NEG_TEXT_VECTORS: Optional[List[np.ndarray]] = None
+
+POSITIVE_PROMPTS = [
+    "a blackboard covered with handwritten mathematical equations, algorithmic derivations, and diagrams",
+    "a clear presentation slide with technical text, formulas, code, and diagrams",
+    "a chalkboard covered with academic lecture notes, formulas, and diagrams",
+]
+
+NEGATIVE_PROMPTS = [
+    "an instructor standing and talking in front of an empty wall or blank blackboard",
+    "a blurry or out of focus video transition shot",
+    "an empty lecture hall, podium, or audience",
+]
+
+
+def get_clip_embedders() -> Tuple[ImageEmbedding, TextEmbedding, List[np.ndarray], List[np.ndarray]]:
+    """Initialize or retrieve cached FastEmbed CLIP embedders and normalized prompt vectors."""
+    global _CLIP_IMG_EMBEDDER, _CLIP_TEXT_EMBEDDER, _POS_TEXT_VECTORS, _NEG_TEXT_VECTORS
+    if _CLIP_IMG_EMBEDDER is None:
+        logger.info("Initializing FastEmbed CLIP Vision & Text embedders (%s, %s)...", CLIP_MODEL, CLIP_TEXT_MODEL)
+        _CLIP_IMG_EMBEDDER = ImageEmbedding(CLIP_MODEL)
+        _CLIP_TEXT_EMBEDDER = TextEmbedding(CLIP_TEXT_MODEL)
+
+        pos_raw = list(_CLIP_TEXT_EMBEDDER.embed(POSITIVE_PROMPTS))
+        _POS_TEXT_VECTORS = [v / np.linalg.norm(v) for v in pos_raw]
+
+        neg_raw = list(_CLIP_TEXT_EMBEDDER.embed(NEGATIVE_PROMPTS))
+        _NEG_TEXT_VECTORS = [v / np.linalg.norm(v) for v in neg_raw]
+
+    return _CLIP_IMG_EMBEDDER, _CLIP_TEXT_EMBEDDER, _POS_TEXT_VECTORS, _NEG_TEXT_VECTORS
 
 
 def compute_frame_sharpness(gray_img: np.ndarray) -> float:
@@ -45,35 +88,32 @@ def compute_frame_sharpness(gray_img: np.ndarray) -> float:
     return float(cv2.Laplacian(gray_img, cv2.CV_64F).var())
 
 
-def compute_edge_density(gray_img: np.ndarray) -> float:
-    """Compute the ratio of high-frequency edges (text, equations, diagrams, slide borders)."""
-    edges = cv2.Canny(gray_img, 50, 150)
-    total_pixels = gray_img.shape[0] * gray_img.shape[1]
-    if total_pixels == 0:
-        return 0.0
-    return float(np.count_nonzero(edges) / total_pixels)
-
-
 def compute_board_contrast_score(gray_img: np.ndarray) -> float:
-    """Compute text/chalk contrast score using percentile variance."""
+    """Compute text/chalk contrast score using percentile difference."""
     p95 = np.percentile(gray_img, 95)
     p05 = np.percentile(gray_img, 5)
     return float(p95 - p05)
 
 
 class KeyframePedagogicalRefiner:
-    """Selects the most pedagogically informative, mature keyframes for VLM captioning and UI display."""
+    """Stratified CLIP Pedagogical Keyframe Refiner.
+    
+    Combines semantic zero-shot CLIP classification with stratified temporal binning
+    to reliably select high-information blackboard and slide frames without omissions.
+    """
 
     def __init__(
         self,
         target_count: int = KEYFRAME_TARGET_COUNT,
+        bin_size_s: float = KEYFRAME_BIN_SIZE_S,
         blur_threshold: float = KEYFRAME_BLUR_THRESHOLD,
-        min_edge_density: float = KEYFRAME_MIN_EDGE_DENSITY,
+        min_net_score: float = KEYFRAME_CLIP_MIN_NET_SCORE,
         dedup_threshold: float = KEYFRAME_DEDUP_SIM_THRESHOLD,
     ) -> None:
         self.target_count = target_count
+        self.bin_size_s = bin_size_s
         self.blur_threshold = blur_threshold
-        self.min_edge_density = min_edge_density
+        self.min_net_score = min_net_score
         self.dedup_threshold = dedup_threshold
 
     def refine_keyframes(
@@ -82,130 +122,199 @@ class KeyframePedagogicalRefiner:
         target_count: Optional[int] = None,
         output_dir: Optional[Union[str, Path]] = None,
         save_frames: bool = True,
+        bin_size_s: Optional[float] = None,
     ) -> List[Dict]:
-        """Filter and rank raw keyframes, returning the top mature pedagogical frames.
+        """Filter and rank raw keyframes using Stratified CLIP scoring.
         
-        If save_frames is True, copies/saves the selected mature frames into output_dir
-        (defaults to data/evidence/filtered_frames/) and writes filtered_keyframes_manifest.json.
+        Args:
+            raw_keyframes: List of dicts with 'timestamp_ms', 'frame_path', 'pis_score'.
+            target_count: Maximum mature keyframes to retain (defaults to self.target_count).
+            output_dir: Destination folder for filtered frames (defaults to FILTERED_FRAMES_DIR).
+            save_frames: Whether to copy filtered frames and write manifest JSON.
+            bin_size_s: Non-overlapping temporal window in seconds (defaults to self.bin_size_s).
+            
+        Returns:
+            List of filtered, mature keyframe metadata dicts sorted chronologically.
         """
         max_k = target_count or self.target_count
         if not raw_keyframes:
             return []
 
         logger.info(
-            "Refining %d raw keyframes (target max: %d mature frames)...",
+            "Refining %d raw candidate keyframes using Stratified CLIP (target: ~%d frames)...",
             len(raw_keyframes),
             max_k,
         )
 
-        candidates = []
+        # Ensure valid paths and timestamps
+        valid_inputs = []
         for kf in raw_keyframes:
-            frame_path = kf.get("frame_path")
-            if not frame_path or not Path(frame_path).exists():
-                continue
+            f_path = kf.get("frame_path")
+            if f_path and Path(f_path).exists():
+                valid_inputs.append(kf)
 
-            img = cv2.imread(str(frame_path))
-            if img is None:
-                continue
+        if not valid_inputs:
+            logger.warning("No valid raw keyframe paths found on disk.")
+            return []
 
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        valid_inputs.sort(key=lambda x: x["timestamp_ms"])
+        min_ts = valid_inputs[0]["timestamp_ms"]
+        max_ts = valid_inputs[-1]["timestamp_ms"]
+        duration_s = max(1.0, (max_ts - min_ts) / 1000.0)
 
-            # 1. Blur test
-            sharpness = compute_frame_sharpness(gray)
-            if sharpness < self.blur_threshold:
-                continue
-
-            # 2. Blackboard / Slide edge density test
-            edge_density = compute_edge_density(gray)
-            if edge_density < self.min_edge_density:
-                continue
-
-            # 3. Text contrast test
-            contrast = compute_board_contrast_score(gray)
-            if contrast < 40.0:  # low contrast washed-out frames
-                continue
-
-            pis = float(kf.get("pis_score", 0.0))
-
-            # Composite maturity score: favours sharp, high-density filled boards
-            maturity_score = (edge_density * 100.0) * 0.5 + (sharpness / 100.0) * 0.2 + (contrast / 10.0) * 0.3
-
-            candidates.append(
-                {
-                    **kf,
-                    "sharpness": sharpness,
-                    "edge_density": edge_density,
-                    "contrast": contrast,
-                    "maturity_score": maturity_score,
-                    "gray_small": cv2.resize(gray, (160, 90)),
-                }
-            )
+        # Dynamic bin sizing: if fixed bin_size_s produces far more bins than target_count,
+        # adjust bin_size_s to provide balanced temporal partitions
+        active_bin_s = bin_size_s or self.bin_size_s
+        if active_bin_s * max_k < duration_s:
+            active_bin_s = duration_s / float(max_k)
+        active_bin_ms = int(round(active_bin_s * 1000.0))
 
         logger.info(
-            "Quality filter passed %d of %d frames (discarded blurred & empty boards).",
-            len(candidates),
-            len(raw_keyframes),
+            "Lecture temporal span: %.1f sec (%.1f mins). Using stratified bin window: %.1f sec.",
+            duration_s,
+            duration_s / 60.0,
+            active_bin_s,
         )
 
-        if not candidates:
-            logger.warning("No frames passed strict quality filter. Falling back to top PIS frames.")
-            final_keyframes = raw_keyframes[:max_k]
-        else:
-            # 4. Temporal Scene Clustering & Derivation Peak Selection
-            # Group frames that occur within 35 seconds of each other into the same pedagogical scene
-            # and select the single frame with highest maturity (completed derivation).
-            scene_clusters: List[List[Dict]] = []
-            current_cluster: List[Dict] = []
-            temporal_window_ms = 35000  # 35 seconds
+        # Stage 1: Batch CLIP Zero-Shot Embedding & Quality Assessment
+        img_embedder, _, pos_vecs, neg_vecs = get_clip_embedders()
 
-            for cand in candidates:
-                if not current_cluster:
-                    current_cluster.append(cand)
-                else:
-                    last_ts = current_cluster[-1]["timestamp_ms"]
-                    if cand["timestamp_ms"] - last_ts <= temporal_window_ms:
-                        current_cluster.append(cand)
-                    else:
-                        scene_clusters.append(current_cluster)
-                        current_cluster = [cand]
+        batch_size = 32
+        scored_candidates = []
 
-            if current_cluster:
-                scene_clusters.append(current_cluster)
+        for i in range(0, len(valid_inputs), batch_size):
+            batch = valid_inputs[i : i + batch_size]
+            batch_paths = [b["frame_path"] for b in batch]
 
-            # In each cluster, pick the frame with the maximum maturity (filled board state)
-            peak_frames = []
-            for cluster in scene_clusters:
-                best_frame = max(cluster, key=lambda x: x["maturity_score"])
-                peak_frames.append(best_frame)
+            try:
+                img_vectors = list(img_embedder.embed(batch_paths))
+            except Exception as e:
+                logger.error("Error embedding keyframe batch with CLIP: %s", e)
+                continue
 
-            logger.info(
-                "Clustered into %d pedagogical scenes, extracted peak filled-board frames.",
-                len(peak_frames),
-            )
+            for kf, iv in zip(batch, img_vectors):
+                norm_iv = iv / (np.linalg.norm(iv) + 1e-6)
 
-            # 5. Cap to target count by overall maturity score
-            if len(peak_frames) > max_k:
-                peak_frames.sort(key=lambda x: x["maturity_score"], reverse=True)
-                peak_frames = peak_frames[:max_k]
+                # Positive & Negative Cosine Similarities
+                pos_sim = max(float(np.dot(norm_iv, pv)) for pv in pos_vecs)
+                neg_sim = max(float(np.dot(norm_iv, nv)) for nv in neg_vecs)
+                nps = pos_sim - neg_sim
 
-            # 6. Re-sort chronologically by timestamp
-            peak_frames.sort(key=lambda x: x["timestamp_ms"])
+                # Quick pixel checks for pure noise rejection
+                gray_img = cv2.imread(kf["frame_path"], cv2.IMREAD_GRAYSCALE)
+                if gray_img is None:
+                    continue
 
-            # Clean temporary fields
-            final_keyframes = []
-            for pf in peak_frames:
-                pf_clean = {k: v for k, v in pf.items() if k != "gray_small"}
-                final_keyframes.append(pf_clean)
+                sharpness = compute_frame_sharpness(gray_img)
+                contrast = compute_board_contrast_score(gray_img)
+                pis = float(kf.get("pis_score", 0.0))
+
+                # Gating: drop only extreme motion blur or pure talking heads with no board
+                if sharpness < self.blur_threshold:
+                    continue
+                if nps < self.min_net_score and neg_sim > 0.30:
+                    continue
+
+                # Pedagogical composite score:
+                # Rewards net positive content (math/slides), penalizes talking heads,
+                # slightly boosts high-contrast text and high-PIS transitions.
+                composite_score = (
+                    (nps * 10.0)
+                    + (pos_sim * 5.0)
+                    + (contrast / 100.0)
+                    + (pis * 2.0)
+                )
+
+                scored_candidates.append(
+                    {
+                        **kf,
+                        "pos_sim": round(pos_sim, 4),
+                        "neg_sim": round(neg_sim, 4),
+                        "net_pedagogical_score": round(nps, 4),
+                        "sharpness": round(sharpness, 2),
+                        "contrast": round(contrast, 2),
+                        "composite_score": round(composite_score, 4),
+                    }
+                )
 
         logger.info(
-            "Successfully refined to %d mature, high-information keyframes.",
+            "Semantic quality gate: retained %d of %d frames (filtered talking heads & blur).",
+            len(scored_candidates),
+            len(valid_inputs),
+        )
+
+        if not scored_candidates:
+            logger.warning("No frames passed semantic gate; falling back to raw keyframes.")
+            return valid_inputs[:max_k]
+
+        # Stage 2: Stratified Temporal Binning (Fixed Non-Overlapping Windows)
+        # Groups candidates into discrete temporal bins [0, bin_s), [bin_s, 2*bin_s)...
+        # Guarantees that every pedagogical section is evaluated and represented.
+        bins: Dict[int, List[Dict]] = {}
+        for cand in scored_candidates:
+            bin_idx = (cand["timestamp_ms"] - min_ts) // active_bin_ms
+            if bin_idx not in bins:
+                bins[bin_idx] = []
+            bins[bin_idx].append(cand)
+
+        bin_selected: List[Dict] = []
+        for b_idx in sorted(bins.keys()):
+            candidates_in_bin = bins[b_idx]
+            # Pick the candidate with the highest pedagogical composite score in this window
+            best_candidate = max(candidates_in_bin, key=lambda x: x["composite_score"])
+            best_candidate["temporal_bin"] = int(b_idx)
+            bin_selected.append(best_candidate)
+
+        logger.info(
+            "Stratified binning: extracted %d peak pedagogical frames across %d active time bins.",
+            len(bin_selected),
+            len(bins),
+        )
+
+        # Stage 3: Consecutive Inter-Bin Deduplication (SSIM)
+        # Drops redundant static slides or identical blackboard views spanning multiple bins
+        deduped: List[Dict] = []
+        for cand in bin_selected:
+            if not deduped:
+                deduped.append(cand)
+            else:
+                prev_cand = deduped[-1]
+                img1 = cv2.resize(cv2.imread(prev_cand["frame_path"], cv2.IMREAD_GRAYSCALE), (224, 224))
+                img2 = cv2.resize(cv2.imread(cand["frame_path"], cv2.IMREAD_GRAYSCALE), (224, 224))
+                if img1 is not None and img2 is not None:
+                    sim = compute_ssim(img1, img2)
+                    if sim > self.dedup_threshold:
+                        # Static content across consecutive bins; keep the higher scoring one
+                        if cand["composite_score"] > prev_cand["composite_score"]:
+                            deduped[-1] = cand
+                        continue
+                deduped.append(cand)
+
+        logger.info(
+            "Inter-bin SSIM dedup (threshold=%.2f): retained %d unique mature keyframes.",
+            self.dedup_threshold,
+            len(deduped),
+        )
+
+        # Stage 4: Cap to target count if necessary while maintaining temporal spread
+        final_keyframes = deduped
+        if len(final_keyframes) > max_k:
+            step = len(final_keyframes) / float(max_k)
+            indices = [int(i * step) for i in range(max_k)]
+            final_keyframes = [final_keyframes[i] for i in indices]
+
+        final_keyframes.sort(key=lambda x: x["timestamp_ms"])
+
+        logger.info(
+            "Final Stratified CLIP refinement complete: %d mature keyframes ready for captioning.",
             len(final_keyframes),
         )
 
-        # 7. Save filtered keyframes to output_dir
+        # Stage 5: Save filtered keyframes to output_dir
         if save_frames and final_keyframes:
             dest_dir = Path(output_dir) if output_dir else FILTERED_FRAMES_DIR
             dest_dir.mkdir(parents=True, exist_ok=True)
+
             for kf in final_keyframes:
                 orig_path_str = kf.get("frame_path")
                 if orig_path_str:
@@ -220,15 +329,18 @@ class KeyframePedagogicalRefiner:
             manifest_path = dest_dir / "filtered_keyframes_manifest.json"
             manifest_payload = {
                 "total_filtered": len(final_keyframes),
+                "bin_size_seconds": round(active_bin_s, 1),
                 "keyframes": [
                     {
                         "timestamp_ms": kf.get("timestamp_ms"),
                         "frame_path": str(kf.get("frame_path")),
-                        "sharpness": round(float(kf.get("sharpness", 0.0)), 2),
-                        "edge_density": round(float(kf.get("edge_density", 0.0)), 4),
-                        "contrast": round(float(kf.get("contrast", 0.0)), 2),
-                        "maturity_score": round(float(kf.get("maturity_score", 0.0)), 2),
-                        "pis_score": round(float(kf.get("pis_score", 0.0)), 4),
+                        "net_pedagogical_score": kf.get("net_pedagogical_score", 0.0),
+                        "pos_sim": kf.get("pos_sim", 0.0),
+                        "neg_sim": kf.get("neg_sim", 0.0),
+                        "sharpness": kf.get("sharpness", 0.0),
+                        "contrast": kf.get("contrast", 0.0),
+                        "composite_score": kf.get("composite_score", 0.0),
+                        "temporal_bin": kf.get("temporal_bin", 0),
                         "content_hash": kf.get("content_hash", ""),
                     }
                     for kf in final_keyframes
@@ -249,7 +361,7 @@ class KeyframePedagogicalRefiner:
 
 
 def main() -> None:
-    """CLI runner to filter raw keyframes from disk and save mature frames."""
+    """CLI runner to filter raw keyframes from disk using Stratified CLIP."""
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
@@ -259,7 +371,7 @@ def main() -> None:
     )
 
     parser = argparse.ArgumentParser(
-        description="Filter raw keyframes to extract high-information, mature blackboard and slide frames."
+        description="Filter raw keyframes to extract high-information, mature blackboard and slide frames using Stratified CLIP."
     )
     parser.add_argument(
         "--input-dir",
@@ -283,16 +395,11 @@ def main() -> None:
         help=f"Maximum mature keyframes to retain (default: {KEYFRAME_TARGET_COUNT})",
     )
     parser.add_argument(
-        "--blur-threshold",
+        "--bin-size",
+        "-b",
         type=float,
-        default=KEYFRAME_BLUR_THRESHOLD,
-        help=f"Laplacian variance blur threshold (default: {KEYFRAME_BLUR_THRESHOLD})",
-    )
-    parser.add_argument(
-        "--min-edge-density",
-        type=float,
-        default=KEYFRAME_MIN_EDGE_DENSITY,
-        help=f"Minimum Canny edge density ratio (default: {KEYFRAME_MIN_EDGE_DENSITY})",
+        default=KEYFRAME_BIN_SIZE_S,
+        help=f"Stratified temporal window size in seconds (default: {KEYFRAME_BIN_SIZE_S})",
     )
     args = parser.parse_args()
 
@@ -342,8 +449,7 @@ def main() -> None:
 
     refiner = KeyframePedagogicalRefiner(
         target_count=args.max_count,
-        blur_threshold=args.blur_threshold,
-        min_edge_density=args.min_edge_density,
+        bin_size_s=args.bin_size,
     )
 
     filtered = refiner.refine_keyframes(
@@ -351,10 +457,11 @@ def main() -> None:
         target_count=args.max_count,
         output_dir=Path(args.output_dir),
         save_frames=True,
+        bin_size_s=args.bin_size,
     )
 
     print("\n" + "=" * 60)
-    print("KEYFRAME FILTER SUMMARY")
+    print("STRATIFIED CLIP KEYFRAME FILTER SUMMARY")
     print("=" * 60)
     print(f"Raw Input Keyframes:     {len(raw_keyframes)}")
     print(f"Filtered Mature Frames:  {len(filtered)}")

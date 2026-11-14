@@ -99,17 +99,19 @@ FALLBACK_VLM_MODELS = [
 
 GROQ_MODEL_QUALITY = "openai/gpt-oss-120b"
 GROQ_MODEL_SPEED = "qwen/qwen3.8-27b"
-GROQ_MAX_TOKENS_A = 1200
-GROQ_MAX_TOKENS_B = 800
+GROQ_MAX_TOKENS_A = 2500  # Generous headroom for full mathematical proofs, derivations & code
+GROQ_MAX_TOKENS_B = 1600  # Fast Pareto profile with complete conceptual explanation
+GROQ_MAX_TOKENS_CONVERSATIONAL = 1200  # Conversational & study coaching budget
 
 # ---------------------------------------------------------------------------
-# Keyframe Refinement & Pedagogical Maturity Filter
+# Keyframe Refinement & Pedagogical Maturity Filter (Stratified CLIP Refiner)
 # ---------------------------------------------------------------------------
 # Controls the secondary pruning stage on raw LEARNet TIB keyframes
-KEYFRAME_TARGET_COUNT = 30         # Maximum mature keyframes to caption per lecture
-KEYFRAME_BLUR_THRESHOLD = 80.0     # Laplacian variance threshold (filters out motion blur)
-KEYFRAME_MIN_EDGE_DENSITY = 0.015  # Minimum Canny edge ratio for valid board/slide content
-KEYFRAME_DEDUP_SIM_THRESHOLD = 0.85 # SSIM dedup for adjacent mature frames
+KEYFRAME_TARGET_COUNT = 35         # Maximum mature keyframes to caption per lecture
+KEYFRAME_BIN_SIZE_S = 90.0         # Stratified temporal window duration in seconds
+KEYFRAME_BLUR_THRESHOLD = 25.0     # Baseline Laplacian variance for pure blur/noise rejection
+KEYFRAME_DEDUP_SIM_THRESHOLD = 0.88 # SSIM dedup for adjacent mature frames across bins
+KEYFRAME_CLIP_MIN_NET_SCORE = -0.04 # Minimum (pos_sim - neg_sim) to reject pure talking heads
 
 # ---------------------------------------------------------------------------
 # Learner memory

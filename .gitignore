@@ -22,7 +22,8 @@ __pycache__/
 .pytest_cache/
 
 # Raw lecture data
-data/raw/
+data/raw/mit-6.006/*
+
 
 # Local databases and vector index locks/storage
 data/fastembed_cache/
@@ -36,3 +37,6 @@ data/fastembed_cache/
 .vscode/
 .DS_Store
 Thumbs.db
+
+tests/
+docs/

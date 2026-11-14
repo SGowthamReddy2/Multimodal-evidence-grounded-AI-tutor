@@ -99,3 +99,28 @@ class RetrievedEvidence:
     status: str = "active"
     content_version: str = ""
 
+
+@dataclass
+class MemoryBlockItem:
+    """Letta/MemGPT-style Core Memory Block item representing durable learner profile traits.
+    
+    Blocks:
+    - goals: Target deadlines, upcoming exams, study objectives
+    - mastery: Concept proficiency levels (Novice, Developing, Proficient, Mastered)
+    - misconceptions: Active false mental models (tracked until resolved)
+    - preferences: Pedagogical learning modes (visual diagrams, code-first, etc.)
+    """
+
+    memory_id: str
+    block_label: Literal["goals", "mastery", "misconceptions", "preferences", "goal", "misconception", "preference"]
+    value: str
+    write_authority: Literal["student_authored", "tutor_proposed", "student_confirmed"] = "student_authored"
+    confidence: float = 0.8
+    evidence: str = ""
+    provenance: str = "dialogue_turn"
+    created_at: str = ""
+    updated_at: str = ""
+    status: Literal["active", "resolved", "deleted"] = "active"
+    revision_history: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+

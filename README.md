@@ -8,13 +8,13 @@
 ## 📌 Table of Contents
 1. [Overview & Core Value Proposition](#-overview--core-value-proposition)
 2. [Key Innovations & Technical Foundations](#-key-innovations--technical-foundations)
-   - [1. LEARNet Temporal Information Bottleneck (TIB)](#1-learnet-temporal-information-bottleneck-tib)
+   - [1. LEARNet Temporal Information Bottleneck (TIB) & Stratified CLIP](#1-learnet-temporal-information-bottleneck-tib)
    - [2. Vision-Language Model (VLM) Extraction & LiteLLM Gateway](#2-vision-language-model-vlm-extraction--litellm-gateway)
    - [3. Multi-Course & Multi-Lecture Architecture](#3-multi-course--multi-lecture-architecture)
    - [4. Hybrid Multi-Vector Retrieval & RRF Fusion](#4-hybrid-multi-vector-retrieval--rrf-fusion)
    - [5. Deterministic Pre-Display Citation Gate](#5-deterministic-pre-display-citation-gate)
-   - [6. Tri-State Epistemic Abstention Policy](#6-tri-state-epistemic-abstention-policy)
-   - [7. Durable Learner Memory with Confirmation Gate](#7-durable-learner-memory-with-confirmation-gate)
+   - [6. Calibrated Epistemic Abstention & Intent Routing](#6-calibrated-epistemic-abstention--intent-routing)
+   - [7. Letta / MemGPT-Inspired Autonomous Learner Memory](#7-letta--memgpt-inspired-autonomous-learner-memory)
 3. [End-to-End System Process Workflow](#-end-to-end-system-process-workflow)
 4. [User Interface Overview (3-Pane Architecture)](#-user-interface-overview-3-pane-architecture)
 5. [Directory & Codebase Structure](#-directory--codebase-structure)
@@ -75,11 +75,16 @@ LEARNet models lecture video as an **Instructional Steady-State (ISS)**, using S
 
 * **Outcome for MIT 6.006 Lecture 3**: From 95,171 raw video frames (52.9 minutes), TIB distilled **241 candidate keyframes** capturing board derivations while ignoring instructor pacing.
 
-#### Secondary Pedagogical Refinement & Blackboard Maturity Filter:
-To prevent API exhaustion and eliminate redundant/incomplete board states:
-1. **Sharpness Gate**: Discards motion-blurred and refocusing frames via Laplacian variance ($\text{Var} < 80.0$).
-2. **Edge Density Gate**: Filters out blank boards and empty instructor shots using Canny edge analysis ($\text{Density} < 0.015$).
-3. **Derivation Peak Selection**: Clusters temporally adjacent frames into visual scenes and selects the single frame with the highest board maturity (completed math derivation and diagrams).
+#### Secondary Pedagogical Refinement: Stratified CLIP & Temporal Binning
+To eliminate heuristic Laplacian variance / Canny edge thresholds and guarantee uniform instructional coverage:
+1. **Zero-Shot Semantic CLIP Scoring (FastEmbed CLIP ViT-B/32)**:
+   - Evaluates each frame against positive pedagogical prompts (*"a blackboard covered with mathematical derivations and diagrams"*, *"a presentation slide with formulas and code"*) versus negative noise (*"talking heads"*, *"empty walls"*, *"motion blur"*).
+   - Computes a Net Pedagogical Score ($\text{NPS} = S_{\text{pos}} - S_{\text{neg}}$) to filter out non-instructional shots.
+2. **Stratified Temporal Binning**:
+   - Partitions the lecture into fixed, non-overlapping temporal windows (e.g., 90s bins) and selects the peak-information frame within each window.
+   - Completely eliminates single-linkage cluster collapse, guaranteeing uniform coverage across the entire lecture.
+3. **Consecutive Inter-Bin Deduplication (SSIM)**:
+   - Removes static slides or unchanged chalkboards that span across adjacent temporal windows ($\text{SSIM} > 0.70$).
 4. **Distillation Result**: Reduces 200–400 raw frames down to **~30 peak mature keyframes** per lecture, cutting VLM API calls by ~88% while retaining all critical diagrams and mathematical derivations.
 
 ---
@@ -90,6 +95,8 @@ Keyframes and slides are analyzed by **Qwen 2.5 27B / GPT-OSS 120B** via a unifi
 * **Semantic Vector Enrichment**: Ingests visual captions directly into the dense and sparse search indices (`text_for_embedding`), enabling text queries to match visual diagrams that the lecturer did not speak aloud.
 * **Persistent Disk Cache**: Caches VLM descriptions in `data/evidence/vlm_captions_cache.json` by image SHA-256 hash to eliminate redundant API calls across ingestion runs.
 * **Rate-Limit Resilience & Reset Window Tracking**: Automatically catches 429 rate limits, parses `retry-after` / `x-ratelimit-reset` headers, routes traffic to secondary fallback models (e.g. `openai/gpt-oss-120b`, `openai/gpt-oss-20b`), and automatically restores the primary model as soon as its reset window clears.
+* **Autonomous Continuation Chaining**: Dynamically detects `finish_reason == "length"` when complex mathematical explanations hit token boundaries, automatically requesting seamless continuation turns without abrupt mid-sentence cutoffs.
+* **Expanded Output Budgets & Pedagogical Completeness Contract**: Enforces end-to-end pedagogical structuring (Definition $\to$ Mechanics $\to$ Mathematical Rigor $\to$ Citations $\to$ Summary) with generous output limits (Config A: 2500 tokens, Config B: 1600 tokens, Conversational: 1200 tokens).
 
 ---
 
@@ -127,21 +134,34 @@ Before any generated response reaches the user, it passes through `CitationValid
 
 ---
 
-### 6. Tri-State Epistemic Abstention Policy
-To eliminate ungrounded hallucinations, the system evaluates the top retrieval score $S$:
-* **State 1: Full Answer ($S \ge 0.65$)**: Sufficient course grounding found; generates full explanation with inline citations.
-* **State 2: Qualified Hedge ($0.45 \le S < 0.65$)**: Partial evidence found; prepends a warning badge indicating moderate confidence.
-* **State 3: Explicit Abstention ($S < 0.45$)**: Off-corpus or unsupported query; immediately emits a standard refusal:
-  > *"I cannot verify this from the approved course material. This question appears to fall outside the scope of MIT 6.006..."*
+### 6. Calibrated Epistemic Abstention & Intent Routing
+To prevent hallucinations while ensuring natural, humane dialogue, queries pass through `QueryIntentClassifier`:
+* **Academic Queries (`ACADEMIC`)**: Evaluates the top retrieval score $S$:
+  - **State 1: Full Answer ($S \ge 0.65$)**: Sufficient course grounding found; generates full explanation with inline citations.
+  - **State 2: Qualified Hedge ($0.45 \le S < 0.65$)**: Partial evidence found; prepends a warning badge indicating moderate confidence.
+  - **State 3: Explicit Abstention ($S < 0.45$)**: Off-corpus or unsupported query; immediately emits a standard refusal:
+    > *"I cannot verify this from the approved course material. This question appears to fall outside the scope of MIT 6.006..."*
+* **Conversational Queries (`CONVERSATIONAL`)**: Polite greetings, hellos, and conversational remarks receive friendly, encouraging tutor responses without triggering false factual abstentions.
+* **Compound Queries (`ACADEMIC_WITH_MEMORY`)**: Queries combining personal study context with academic questions (e.g. *"I have my mid examination tomorrow, can you explain the worst-case runtime of Merge Sort?"*) simultaneously update working memory and retrieve course evidence.
 
 ---
 
-### 7. Durable Learner Memory with Confirmation Gate
-Managed by SQLite in Write-Ahead Logging (WAL) mode (`data/learner_memory.db`):
-* **Memory Schema**: Tracks `goal`, `mastery`, `misconception`, and `preference`.
-* **Confirmation Gate**: Insights inferred by the tutor are marked `tutor_proposed`. They become active only after the student confirms them in the UI (`student_confirmed`).
-* **Confidence Decay**: Memories decay exponentially with a **30-day half-life** ($C(t) = C_0 \cdot 2^{-\Delta t / 30}$) to reflect natural skill evolution.
-* **Prompt Injection Protection**: Sanitizes inputs against adversarial escape patterns (`[INST]`, `SYSTEM:`, `<|im_start|>`) and caps lengths at 180 characters.
+### 7. Letta / MemGPT-Inspired Autonomous Learner Memory
+Derived from the **MemGPT / Letta OS-Style Virtual Memory Hierarchy** (*Packer et al., arXiv:2310.08560*), the tutor maintains durable cross-session context in SQLite WAL (`data/learner_memory.db`):
+* **Three-Tier Memory Architecture**:
+  1. **Working Context (In-Context RAM)**: Structured Core Memory Blocks (`goals`, `mastery`, `misconceptions`, `preferences`) injected directly into the LLM prompt.
+  2. **Recall Storage (External DB)**: Multi-session chat history (`chat_sessions` and `chat_messages`) supporting session switching, persistent history across refreshes, and automatic titling.
+  3. **Archival Storage**: High-capacity long-term semantic notes with keyword-based search (`archival_memory_insert`, `archival_memory_search`).
+* **Autonomous Dialogue CRUD**:
+  - The `LearnerMemoryEngine` continuously reasons about incoming dialogue:
+    - **CREATE**: Registers new deadlines (*"I have an exam on Friday"*), mastery hurdles (*"I am weak in recurrences"*), or learning preferences.
+    - **UPDATE**: Adjusts exam dates on reschedule (*"Exam moved to Monday"*) or upgrades mastery levels.
+    - **DELETE / FORGET**: Removes resolved hurdles or cancelled goals (*"I understand recursion trees now"*).
+* **Streamlined Student Profile Governance**:
+  - **Zero-ID Item Removal**: Students inspect their active profile via a clean Markdown profile card and can remove any item using an **Active Items Dropdown** and a single **`🗑️ Forget Selected`** button (no raw database IDs or copy-pasting required).
+  - **One-Click Profile Reset**: A **`🧹 Clear All Profile Memories`** button resets working memory to a clean slate.
+  - **Confidence Decay**: Memories decay exponentially with a **30-day half-life** ($C(t) = C_0 \cdot 2^{-\Delta t / 30}$) to reflect natural skill progression.
+  - **Prompt Injection Protection**: Sanitizes inputs against adversarial escape patterns (`[INST]`, `SYSTEM:`, `<|im_start|>`) and caps lengths at 180 characters.
 
 ---
 
@@ -233,18 +253,26 @@ Built with **Gradio 6**, the web interface provides an integrated pedagogical wo
 1. **Top Scope & Navigation Bar**:
    * Dynamic **Course Selector** (`mit-6.006`, etc.) and **Lecture Selector** (`lecture-03`, `lecture-04`) discovered directly from `data/raw/`.
    * **Retrieval Scope Switcher**: Narrow queries to *"Current Lecture"*, expand to *"Entire Course"*, or search across *"All Courses"*.
-2. **Left Pane (Chat Workspace)**:
-   * Interactive chat stream with Markdown and LaTeX equation rendering.
-   * Real-time **Decision Status Badge** (`FULL ANSWER`, `QUALIFIED HEDGE`, `EXPLICIT ABSTENTION`).
+2. **Left Pane (Chat Workspace & Session Management)**:
+   * **Ephemeral Chat Sessions**: Dropdown (`🗂️ Active Chat Session`) allows switching between conversation threads, creating new sessions (`➕ New`), or deleting sessions (`🗑️`).
+   * **Automatic Session Titling**: Automatically titles sessions based on the student's first question.
+   * **Persistent Chat History**: Restores previous chat exchanges across sessions and page refreshes.
+   * Interactive chat stream with Markdown, LaTeX equation formatting, and verified citation badges.
+   * Real-time **Decision Status Badge** (`FULL ANSWER`, `QUALIFIED HEDGE`, `EXPLICIT ABSTENTION`, `CONVERSATIONAL`, `LEARNER PROFILE UPDATED`).
    * Config switcher: **Config A (Quality-Optimized)** vs. **Config B (Speed-Optimized)**.
 3. **Right Top Pane (Media & Evidence Viewer)**:
    * HTML5 video player dynamically mounted to active lecture video.
    * **Play Cited Moment** button automatically seeks playback to the evidence timestamp via client-side JavaScript (`SEEK_VIDEO_JS`).
    * Visual evidence inspector displays high-resolution slide PNGs or mature filtered blackboard keyframes from `data/evidence/filtered_frames/`.
    * Dual timestamp formatting: readable minutes & seconds (`44:30 (44m 30s)`) in UI alongside precise millisecond seeking.
-4. **Right Bottom Pane (Learner Memory Governance)**:
-   * Interactive table displaying active student profile attributes.
-   * Form to manually add, edit, or delete memory records under student governance.
+4. **Right Bottom Pane (Student Learning Profile)**:
+   * **Active Learning Profile Card**: Displays structured Core Memory Blocks:
+     - 🎯 **Goals & Deadlines** (e.g. *Midterm exam tomorrow*)
+     - 📈 **Knowledge State & Mastery** (e.g. *Weakness / Needs support with: Recurrence trees*)
+     - 🎨 **Pedagogical Preferences** (e.g. *Prefers visual diagrams and derivations*)
+   * **Zero-ID Active Items Manager**: Clean dropdown of active memories paired with a **`🗑️ Forget Selected`** button.
+   * **One-Click Profile Reset**: **`🧹 Clear All Profile Memories`** button wipes working memory to start fresh.
+   * **Manual Add Form**: Form to add custom goals, mastery notes, or preferences directly into the profile.
 
 ---
 
@@ -275,14 +303,14 @@ Project - Multimodal AI Tutor/
 │
 ├── src/
 │   ├── config.py               # System constants, dimensions, and hyperparameters
-│   ├── models.py               # Immutable dataclass contracts (MultimodalChunk, etc.)
+│   ├── models.py               # Immutable dataclass contracts (MultimodalChunk, MemoryBlockItem, etc.)
 │   ├── storage.py              # Qdrant collection manager with named vectors & RRF
 │   ├── service.py              # Core TutorService orchestrator
 │   │
 │   ├── ingestion/              # Ingestion & preprocessing subsystem
 │   │   ├── embedder.py         # FastEmbed multi-vector generator (BGE + BM25 + CLIP)
 │   │   ├── video_processor.py  # LEARNet TIB Keyframe Extractor & Subtitle Chunker
-│   │   ├── keyframe_filter.py  # Pedagogical Maturity Refiner (Laplacian blur & Canny edge density)
+│   │   ├── keyframe_filter.py  # Stratified CLIP & Temporal Binning Keyframe Refiner
 │   │   ├── vlm_captioner.py    # VLM visual analyzer (Qwen 2.5 27B) with disk caching
 │   │   ├── pdf_processor.py    # PyMuPDF 150 DPI Slide Renderer & Text Extractor
 │   │   └── pipeline.py         # End-to-end multi-course ingestion pipeline orchestrator
@@ -292,16 +320,24 @@ Project - Multimodal AI Tutor/
 │   │   └── formatter.py        # Prompt context & UI badge formatting
 │   │
 │   ├── generation/             # Grounding & policy subsystem
-│   │   ├── gateway.py          # Unified LiteLLM client with rate-limit tracking & fallback
-│   │   ├── llm.py              # Grounded generation engine with inline citations
+│   │   ├── gateway.py          # Unified LiteLLM client with rate-limit tracking, fallback & continuation
+│   │   ├── llm.py              # Grounded generation engine with inline citations & completeness contract
+│   │   ├── intent.py           # Multi-intent classifier (Academic, Conversational, Profile Update)
 │   │   ├── validator.py        # Pre-display citation verification gate
 │   │   └── abstention.py       # Tri-state epistemic abstention policy
 │   │
-│   ├── memory/                 # Learner memory subsystem
-│   │   └── controller.py       # SQLite WAL manager with Confirmation Gate & CRUD
+│   ├── memory/                 # Learner memory subsystem (Letta / MemGPT Architecture)
+│   │   ├── controller.py       # SQLite WAL manager for Core, Ephemeral & Archival memory tiers
+│   │   ├── engine.py           # Autonomous CRUD planning, entity resolution & prompt formatting
+│   │   └── extractor.py        # Student dialogue signal and pattern extractor
 │   │
 │   └── ui/                     # Presentation subsystem
-│       └── app.py              # 3-Pane Gradio 6 web application
+│       └── app.py              # 3-Pane Gradio 6 web application with multi-session chat
+│
+├── tests/                      # Automated Test Suite (31 tests passing)
+│   ├── test_letta_memory.py    # Core memory blocks, multi-session continuity & autonomous CRUD
+│   ├── test_memory_and_intent.py # Intent classification, compound routing & prompt injection
+│   └── test_ui_session.py      # Session management, history restoration & auto-titling
 │
 ├── scripts/
 │   ├── ingest.py               # CLI runner for lecture ingestion
@@ -344,6 +380,13 @@ Start the interactive 3-pane Gradio application:
 
 Open your browser to:
 👉 **`http://127.0.0.1:7860`**
+
+### 4. Running the Automated Test Suite
+Verify that all unit and integration test suites pass (31 / 31 tests passing):
+
+```powershell
+.venv\Scripts\python -m unittest tests/test_letta_memory.py tests/test_ui_session.py tests/test_memory_and_intent.py
+```
 
 ---
 
@@ -417,9 +460,10 @@ Filter raw keyframes to extract high-information, mature blackboard and slide fr
 | **M2** | Multi-Channel Hybrid Retrieval & RRF | ✅ Complete | [`retriever.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/retrieval/retriever.py) ($k=30$, named vectors), [`storage.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/storage.py) (scoped `course_id`/`lecture_id` payload filters) |
 | **M3** | Second-Accurate Verifiable Citations | ✅ Complete | [`validator.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/validator.py) (`[claim_id \| evidence_id]`), [`llm.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/llm.py) |
 | **M4** | Multimodal Grounding (Slides & Boards)| ✅ Complete | [`vlm_captioner.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ingestion/vlm_captioner.py) (Qwen 2.5 27B), [`gateway.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/gateway.py) (LiteLLM rate-limit tracker & cooldown restore) |
-| **M5** | Selective Learner Memory & Governance | ✅ Complete | [`controller.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/memory/controller.py) (Confirmation Gate, CRUD, exponential decay) |
-| **M6** | Calibrated Epistemic Abstention | ✅ Complete | [`abstention.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/abstention.py) (Tri-state thresholds: 0.65 / 0.45) |
-| **UI** | 3-Pane Interactive Web Frontend | ✅ Complete | [`app.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ui/app.py) (Gradio 6 layout, dynamic course/lecture dropdowns, scope selectors, JavaScript video DOM seek) |
+| **M5** | Selective Learner Memory & Governance | ✅ Complete | [`controller.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/memory/controller.py), [`engine.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/memory/engine.py), [`intent.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/intent.py) (Letta/MemGPT Core Memory Blocks, Autonomous CRUD, Multi-Session History, Student Learning Profile UI) |
+| **M6** | Calibrated Epistemic Abstention & Intent | ✅ Complete | [`abstention.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/abstention.py), [`intent.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/intent.py) (Tri-state thresholds & Humane Conversational routing) |
+| **UI** | 3-Pane Interactive Web Frontend | ✅ Complete | [`app.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ui/app.py) (Gradio 6 layout, multi-session chat, dynamic course/lecture dropdowns, video seeking, Student Learning Profile manager) |
+| **Tests** | Comprehensive Unit & Integration Suites | ✅ Complete | [`tests/`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/tests/) (31 / 31 passing unit tests across memory, intent, UI sessions, and retrieval) |
 | **M7** | Automated Evaluation Harness | ⏸️ On Hold | Awaiting user's `data/benchmark_queries.json` |
 | **M8** | Config A vs Config B Pareto Analysis | ⏸️ On Hold | Prepared in Component 12; awaiting query dataset |
 | **Comp 7**| RAG-Anything Graph Trial | ⏸️ On Hold | Kept on hold per user instruction |

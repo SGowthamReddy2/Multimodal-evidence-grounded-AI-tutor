@@ -167,10 +167,20 @@ class LEARNetTIBExtractor:
         logger.info("Sampled %d frames. Running Density Peak Clustering (DPC)...", n_samples)
 
         # Step 2: Density Peak Clustering (DPC)
+        # In accordance with LEARNet TIB (Entropy 2026), distance incorporates both
+        # pedagogical score variation (PIS) and temporal locality to prevent cluster collapse.
         pis_array = np.array(pis_scores, dtype=np.float32)
-        diff_matrix = np.abs(pis_array[:, None] - pis_array[None, :])
+        pis_min, pis_max = float(np.min(pis_array)), float(np.max(pis_array))
+        norm_pis = (pis_array - pis_min) / (pis_max - pis_min + 1e-6)
+        norm_time = np.linspace(0.0, 1.0, n_samples, dtype=np.float32)
 
-        # Cut-off distance sigma (2nd percentile of pairwise differences)
+        # Spatio-temporal distance matrix: d_ij = sqrt((ΔPIS)^2 + beta * (Δt)^2)
+        beta = 0.5
+        pis_diff = norm_pis[:, None] - norm_pis[None, :]
+        time_diff = norm_time[:, None] - norm_time[None, :]
+        diff_matrix = np.sqrt(pis_diff ** 2 + beta * (time_diff ** 2))
+
+        # Cut-off distance sigma (2nd percentile of pairwise spatio-temporal distances)
         triu_indices = np.triu_indices(n_samples, k=1)
         if len(triu_indices[0]) > 0:
             pairwise_dists = diff_matrix[triu_indices]

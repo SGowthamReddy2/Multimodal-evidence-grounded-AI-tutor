@@ -170,10 +170,10 @@ class LiteLLMGateway:
         prompt: str,
         system_prompt: Optional[str] = None,
         model: Optional[str] = None,
-        max_tokens: int = 1000,
+        max_tokens: int = 2000,
         temperature: float = 0.1,
     ) -> str:
-        """Generate text completion with rate-limit tracking and fallback."""
+        """Generate text completion with rate-limit tracking, fallback, and continuation for complete answers."""
         task_type = "llm"
         active_model = self._get_active_model(task_type, model)
 
@@ -182,26 +182,54 @@ class LiteLLMGateway:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        try:
+        def _call_with_continuation(mdl: str) -> str:
             resp = litellm.completion(
-                model=active_model,
+                model=mdl,
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
-            return resp.choices[0].message.content or ""
+            choice = resp.choices[0]
+            content = choice.message.content or ""
+            finish_reason = getattr(choice, "finish_reason", None)
+
+            # If completion was cut off due to max_tokens, automatically fetch continuation
+            if finish_reason == "length" and content.strip():
+                logger.warning(
+                    "Model '%s' output reached max_tokens limit (%d). Fetching seamless continuation...",
+                    mdl,
+                    max_tokens,
+                )
+                continuation_messages = list(messages) + [
+                    {"role": "assistant", "content": content},
+                    {
+                        "role": "user",
+                        "content": "Please continue and conclude your explanation completely from where you left off.",
+                    },
+                ]
+                try:
+                    cont_resp = litellm.completion(
+                        model=mdl,
+                        messages=continuation_messages,
+                        max_tokens=max(1000, max_tokens // 2),
+                        temperature=temperature,
+                    )
+                    cont_text = (cont_resp.choices[0].message.content or "").strip()
+                    if cont_text:
+                        content = content.rstrip() + "\n\n" + cont_text
+                except Exception as cont_err:
+                    logger.warning("Continuation request failed (%s); returning initial content.", cont_err)
+
+            return content
+
+        try:
+            return _call_with_continuation(active_model)
         except Exception as e:
             err_msg = str(e).lower()
             if "rate_limit" in err_msg or "429" in err_msg or "rate limit" in err_msg:
                 fallback_model = self._record_rate_limit(task_type, active_model, e)
                 logger.info("Retrying text completion with fallback model: %s", fallback_model)
-                resp = litellm.completion(
-                    model=fallback_model,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                )
-                return resp.choices[0].message.content or ""
+                return _call_with_continuation(fallback_model)
             raise
 
     def caption_image(

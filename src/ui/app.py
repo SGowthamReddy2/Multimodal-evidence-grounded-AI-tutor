@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
+
 import gradio as gr
 
 from src.config import DATA_DIR, DEFAULT_COURSE_ID, FRAMES_DIR, PROJECT_ROOT, RAW_DIR, SLIDES_DIR
@@ -85,6 +87,163 @@ def find_lecture_video(course_id: str, lecture_id: str) -> Optional[str]:
     return None
 
 
+def get_session_choices(tutor_service: TutorService, learner_id: str = "student_01") -> Tuple[List[Tuple[str, str]], Optional[str]]:
+    """Retrieve formatted session choices (display_label, session_id) and the active session ID."""
+    sessions = tutor_service.memory.list_sessions(learner_id)
+    if not sessions:
+        first_id = tutor_service.memory.create_session(learner_id, "Interactive Session")
+        sessions = tutor_service.memory.list_sessions(learner_id)
+
+    choices = []
+    for s in sessions:
+        title = (s.get("title") or "Untitled Session").strip()
+        sid = s["session_id"]
+        short_sid = sid[5:13] if sid.startswith("sess-") else sid[:8]
+        display_label = f"{title[:28]} ({short_sid})"
+        choices.append((display_label, sid))
+    active_id = sessions[0]["session_id"] if sessions else None
+    return choices, active_id
+
+
+def load_session_messages_for_chatbot(tutor_service: TutorService, session_id: Optional[str]) -> List[Dict[str, str]]:
+    """Load dialogue messages from SQLite for a session and format for gr.Chatbot."""
+    if not session_id:
+        return []
+    raw_msgs = tutor_service.memory.get_session_messages(session_id, limit=100)
+    formatted = []
+    for m in raw_msgs:
+        role = m.get("role", "user")
+        if role in ("user", "assistant"):
+            formatted.append({"role": role, "content": m.get("content", "")})
+    return formatted
+
+
+def load_memory_table_data(tutor_service: TutorService, learner_id: str = "student_01") -> List[List[Any]]:
+    """Retrieve and format learner memory records for the governance dataframe."""
+    records = tutor_service.memory.list_all_records(learner_id)
+    return [
+        [
+            r["memory_id"],
+            r["type"],
+            r["value"],
+            r["write_authority"],
+            round(r["confidence"], 2),
+            r["created_at"],
+        ]
+        for r in records
+    ]
+
+
+def load_core_memory_markdown(tutor_service: TutorService, learner_id: str = "student_01") -> str:
+    """Return formatted markdown profile card of active core memory blocks."""
+    if not hasattr(tutor_service, "memory") or not hasattr(tutor_service.memory, "get_active_core_memory_blocks"):
+        return "### 🧠 Active Student Profile: Initializing..."
+
+    blocks = tutor_service.memory.get_active_core_memory_blocks(learner_id)
+    goals = blocks.get("goals", [])
+    mastery = blocks.get("mastery", [])
+    misconceptions = blocks.get("misconceptions", [])
+    preferences = blocks.get("preferences", [])
+
+    total_active = len(goals) + len(mastery) + len(misconceptions) + len(preferences)
+
+    lines = [
+        "### 🧠 Active Student Learning Profile",
+        f"*Durable working memory actively maintained across all chat sessions ({total_active} active trait(s))*",
+        "",
+    ]
+
+    # Goals section
+    lines.append("#### 🎯 Goals & Deadlines")
+    if goals:
+        for g in goals:
+            lines.append(f"- **{g['value']}** *(Noted: {g['created_at'][:10]})*")
+    else:
+        lines.append("- *No specific assessment deadlines or goals recorded yet.*")
+    lines.append("")
+
+    # Knowledge & Mastery section
+    lines.append("#### 📈 Knowledge State & Mastery")
+    if mastery or misconceptions:
+        for m in mastery:
+            lines.append(f"- **{m['value']}**")
+        for misc in misconceptions:
+            lines.append(f"- ⚠️ **{misc['value']}** *(Focus area)*")
+    else:
+        lines.append("- *General MIT 6.006 student baseline.*")
+    lines.append("")
+
+    # Preferences section
+    lines.append("#### 🎨 Learning Preferences")
+    if preferences:
+        for p in preferences:
+            lines.append(f"- **{p['value']}**")
+    else:
+        lines.append("- *Balanced pedagogical explanations (step-by-step mathematical & visual).*")
+
+    return "\n".join(lines)
+
+
+def handle_app_init(tutor_service: TutorService, learner_id: str = "student_01"):
+    """Restore active session, chat history, and learner profile on launch or browser refresh."""
+    choices, active_id = get_session_choices(tutor_service, learner_id)
+    history = load_session_messages_for_chatbot(tutor_service, active_id)
+    mem_table = load_memory_table_data(tutor_service, learner_id)
+    badge = (
+        f"🟢 **Tutor Status**: Restored session with {len(history)} message(s)"
+        if history
+        else "🟢 **Tutor Status**: Ready (Ephemeral Memory Active)"
+    )
+    return (
+        gr.Dropdown(choices=choices, value=active_id),
+        history,
+        active_id,
+        mem_table,
+        badge,
+    )
+
+
+def handle_session_select(tutor_service: TutorService, selected_session_id: Optional[str]):
+    """Handle switching between sessions from the dropdown."""
+    if not selected_session_id:
+        return [], None, "⚪ **Tutor Status**: No Session Selected"
+    history = load_session_messages_for_chatbot(tutor_service, selected_session_id)
+    badge = f"🟢 **Tutor Status**: Active Session Loaded ({len(history)} message(s))"
+    return history, selected_session_id, badge
+
+
+def handle_new_session_click(tutor_service: TutorService, learner_id: str = "student_01"):
+    """Create a brand new conversation session and clear the chatbot workspace."""
+    new_sess_id = tutor_service.memory.create_session(learner_id, "New Session")
+    choices, _ = get_session_choices(tutor_service, learner_id)
+    return (
+        gr.Dropdown(choices=choices, value=new_sess_id),
+        [],
+        "",
+        new_sess_id,
+        "🟢 **Tutor Status**: Started New Chat Session",
+    )
+
+
+def handle_delete_session_click(tutor_service: TutorService, active_session_id: Optional[str], learner_id: str = "student_01"):
+    """Delete the current chat session and load the next available session."""
+    if active_session_id:
+        tutor_service.memory.delete_session(active_session_id)
+    choices, next_id = get_session_choices(tutor_service, learner_id)
+    history = load_session_messages_for_chatbot(tutor_service, next_id)
+    badge = (
+        f"🟡 **Tutor Status**: Session deleted. Active: {next_id[:8]} ({len(history)} message(s))"
+        if next_id
+        else "⚪ **Tutor Status**: No Active Sessions"
+    )
+    return (
+        gr.Dropdown(choices=choices, value=next_id),
+        history,
+        next_id,
+        badge,
+    )
+
+
 def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
     """Construct the Gradio Blocks web application."""
     tutor_service = service or TutorService()
@@ -98,7 +257,10 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
 
     initial_video_path = find_lecture_video(default_course, default_lecture)
 
-    with gr.Blocks(title="Multimodal Evidence-Grounded AI Tutor") as demo:
+    with gr.Blocks(
+        title="Multimodal Evidence-Grounded AI Tutor",
+        analytics_enabled=False,
+    ) as demo:
         gr.Markdown(
             """
             # 🎓 Multimodal Evidence-Grounded AI Tutor
@@ -133,10 +295,20 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
             # ==========================================================
             with gr.Column(scale=6):
                 gr.Markdown("### 💬 Tutor Dialogue")
+                with gr.Row():
+                    session_selector = gr.Dropdown(
+                        choices=[],
+                        value=None,
+                        label="🗂️ Active Chat Session",
+                        scale=8,
+                        interactive=True,
+                    )
+                    new_session_btn = gr.Button("➕ New", scale=2, variant="secondary")
+                    del_session_btn = gr.Button("🗑️", scale=1, variant="stop", min_width=45)
+
                 chatbot = gr.Chatbot(
                     label="Tutor Conversation",
-                    height=520,
-                    avatar_images=(None, "https://upload.wikimedia.org/wikipedia/commons/0/0c/MIT_logo.svg"),
+                    height=480,
                 )
 
                 with gr.Row():
@@ -153,10 +325,12 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
                         choices=["Config A (Quality)", "Config B (Speed)"],
                         value="Config A (Quality)",
                         label="Operational Mode (M8 Pareto Benchmark)",
+                        scale=7,
                     )
-                    clear_btn = gr.ClearButton([chatbot, query_input])
+                    clear_input_btn = gr.ClearButton([query_input], value="🧹 Clear Input", scale=3)
 
-                decision_badge = gr.Markdown("🟢 **Tutor Status**: Ready")
+                session_state = gr.State(value=None)
+                decision_badge = gr.Markdown("🟢 **Tutor Status**: Ready (Ephemeral Memory Active)")
 
             # ==========================================================
             # Right Pane: Evidence & Memory Tabs (scale=6)
@@ -195,39 +369,47 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
                         with gr.Accordion("🔍 Top-K Retrieved Evidence Candidates", open=False):
                             evidence_json = gr.JSON(label="Retrieved Evidence Chunks & Provenance")
 
-                    # Tab 2: Learner Memory Governance Panel
-                    with gr.Tab("🧠 Learner Memory Governance"):
-                        gr.Markdown(
-                            """
-                            #### Student Profile Governance
-                            Inspect, confirm, edit, or delete durable memory records.
-                            """
+                    # Tab 2: Student Learning Profile & Memory Manager
+                    with gr.Tab("🧠 Student Learning Profile"):
+                        core_memory_md = gr.Markdown(
+                            value=load_core_memory_markdown(tutor_service, "student_01"),
                         )
-                        memory_table = gr.Dataframe(
-                            headers=["Memory ID", "Type", "Value", "Authority", "Confidence", "Created At"],
-                            datatype=["str", "str", "str", "str", "number", "str"],
-                            label="Active Memory Records",
-                            interactive=False,
-                        )
-                        refresh_mem_btn = gr.Button("🔄 Refresh Memory Table")
 
-                        gr.Markdown("##### Add / Confirm Profile Attribute")
+                        gr.Markdown("---")
+                        gr.Markdown("##### ⚙️ Manage Active Memories")
+                        with gr.Row():
+                            active_items_dropdown = gr.Dropdown(
+                                choices=tutor_service.memory.get_active_memory_choices("student_01") if hasattr(tutor_service, "memory") and hasattr(tutor_service.memory, "get_active_memory_choices") else [],
+                                value=None,
+                                label="Select an Active Memory to Remove",
+                                scale=8,
+                                interactive=True,
+                            )
+                            forget_btn = gr.Button("🗑️ Forget Selected", variant="stop", scale=4)
+
+                        with gr.Row():
+                            clear_all_mem_btn = gr.Button("🧹 Clear All Profile Memories", variant="secondary", scale=6)
+                            refresh_mem_btn = gr.Button("🔄 Refresh Profile", variant="secondary", scale=6)
+
+                        gr.Markdown("---")
+                        gr.Markdown("##### ➕ Manually Add Goal or Preference")
                         with gr.Row():
                             mem_type = gr.Dropdown(
-                                choices=["goal", "mastery", "misconception", "preference"],
-                                value="goal",
-                                label="Attribute Type",
+                                choices=[
+                                    ("🎯 Goal & Deadline", "goals"),
+                                    ("📈 Concept Mastery / Focus", "mastery"),
+                                    ("🎨 Learning Preference", "preferences"),
+                                ],
+                                value="goals",
+                                label="Category",
+                                scale=4,
                             )
                             mem_value = gr.Textbox(
-                                placeholder="e.g., 'Targeting mastery of divide-and-conquer recurrences'",
-                                label="Profile Value",
+                                placeholder="e.g. 'Midterm exam tomorrow' or 'Prefers step-by-step visual proofs'",
+                                label="Content",
+                                scale=8,
                             )
-                        add_mem_btn = gr.Button("Save to Profile", variant="secondary")
-
-                        gr.Markdown("##### Delete Profile Record")
-                        with gr.Row():
-                            del_id_input = gr.Textbox(placeholder="mem-xxxx", label="Memory ID to Delete")
-                            del_btn = gr.Button("Delete Record", variant="stop")
+                        add_mem_btn = gr.Button("➕ Save to Profile", variant="primary")
 
         # --------------------------------------------------------------
         # Reactive Event Handlers
@@ -254,6 +436,18 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
             outputs=[video_player],
         )
 
+        def on_app_init():
+            return handle_app_init(tutor_service, "student_01")
+
+        def on_session_select(selected_session_id: Optional[str]):
+            return handle_session_select(tutor_service, selected_session_id)
+
+        def on_new_session_click():
+            return handle_new_session_click(tutor_service, "student_01")
+
+        def on_delete_session_click(active_session_id: Optional[str]):
+            return handle_delete_session_click(tutor_service, active_session_id, "student_01")
+
         def handle_query(
             user_query: str,
             chat_history: List[Dict],
@@ -261,15 +455,22 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
             course_choice: str,
             lecture_choice: str,
             scope_choice: str,
+            current_session_id: Optional[str],
         ):
             if not user_query.strip():
+                choices, _ = get_session_choices(tutor_service, "student_01")
                 return (
                     chat_history,
+                    user_query,
                     "⚪ **Tutor Status**: Empty query",
                     None,
                     "00:00 (0m 00s)",
                     0.0,
                     [],
+                    current_session_id,
+                    gr.update(choices=load_active_choices(), value=None),
+                    gr.Dropdown(choices=choices, value=current_session_id),
+                    load_core_md(),
                 )
 
             config_code = "A" if "Config A" in config_choice else "B"
@@ -280,10 +481,15 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
             target_course = course_choice if scope_choice in ("Current Lecture", "Entire Course") else None
             target_lecture = lecture_choice if scope_choice == "Current Lecture" else None
 
-            # Call TutorService
+            # Ensure we have a valid active session
+            if not current_session_id:
+                current_session_id = tutor_service.memory.get_or_create_session("student_01")
+
+            # Call TutorService with session_id
             res = tutor_service.answer_query(
                 query=user_query,
                 learner_id="student_01",
+                session_id=current_session_id,
                 config=config_code,
                 course_id=target_course,
                 lecture_id=target_lecture,
@@ -292,14 +498,37 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
             bot_reply = res["answer"]
             chat_history.append({"role": "assistant", "content": bot_reply})
 
-            decision = res["decision"]
-            top_score = res["top_score"]
-            if decision == "FULL":
+            decision = res.get("decision", "FULL")
+            top_score = res.get("top_score", 0.0)
+            active_session = res.get("session_id", current_session_id)
+            memories_added = res.get("proposed_memories", [])
+
+            # Check if session needs auto-titling based on first query
+            sessions = tutor_service.memory.list_sessions("student_01")
+            for s in sessions:
+                if s["session_id"] == active_session:
+                    if s.get("title") in ("New Session", "Interactive Session", "Interactive Tutor Session", "Untitled Session"):
+                        clean_title = user_query.strip().replace("\n", " ")
+                        if len(clean_title) > 35:
+                            clean_title = clean_title[:32] + "..."
+                        tutor_service.memory.update_session_title(active_session, clean_title)
+                    break
+
+            choices, _ = get_session_choices(tutor_service, "student_01")
+
+            if decision == "CONVERSATIONAL":
+                status_text = "💬 **Decision**: CONVERSATIONAL (Humane Response)"
+            elif decision == "PROFILE_UPDATED":
+                status_text = f"🧠 **Decision**: LEARNER PROFILE UPDATED ({len(memories_added)} trait(s) saved)"
+            elif decision == "FULL":
                 status_text = f"🟢 **Decision**: FULL ANSWER (Confidence: {top_score:.3f})"
             elif decision == "QUALIFIED":
                 status_text = f"🟡 **Decision**: QUALIFIED HEDGE (Confidence: {top_score:.3f})"
             else:
                 status_text = f"🔴 **Decision**: EXPLICIT ABSTENTION (Confidence: {top_score:.3f})"
+
+            if memories_added and decision not in ("PROFILE_UPDATED",):
+                status_text += f" | 💡 Noted {len(memories_added)} profile trait(s)"
 
             # Timestamp & asset navigation
             ts_ms = res.get("primary_video_timestamp_ms")
@@ -311,39 +540,62 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
 
             return (
                 chat_history,
+                "",  # Clear query input box
                 status_text,
                 asset_path,
                 ts_str,
                 ts_sec,
                 res.get("evidence_badges", []),
+                active_session,
+                gr.update(choices=load_active_choices(), value=None),
+                gr.Dropdown(choices=choices, value=active_session),
+                load_core_md(),
             )
 
-        def load_memory_table():
-            records = tutor_service.memory.list_all_records("student_01")
-            data = [
-                [
-                    r["memory_id"],
-                    r["type"],
-                    r["value"],
-                    r["write_authority"],
-                    round(r["confidence"], 2),
-                    r["created_at"],
-                ]
-                for r in records
-            ]
-            return data
+        def load_active_choices():
+            if hasattr(tutor_service, "memory") and hasattr(tutor_service.memory, "get_active_memory_choices"):
+                return tutor_service.memory.get_active_memory_choices("student_01")
+            return []
+
+        def load_core_md():
+            return load_core_memory_markdown(tutor_service, "student_01")
+
+        def forget_selected_memory(m_id: Optional[str]):
+            if m_id and str(m_id).strip():
+                tutor_service.memory.core_memory_delete(str(m_id).strip(), "Removed by student in profile")
+            choices = load_active_choices()
+            return load_core_md(), gr.update(choices=choices, value=None)
+
+        def clear_all_memory():
+            tutor_service.memory.clear_all_learner_memory("student_01", "Student cleared all profile memories")
+            choices = load_active_choices()
+            return load_core_md(), gr.update(choices=choices, value=None)
+
+        def refresh_memory():
+            choices = load_active_choices()
+            return load_core_md(), gr.update(choices=choices, value=None)
 
         def add_memory(m_type: str, m_val: str):
-            if m_val.strip():
-                tutor_service.memory.add_student_memory("student_01", m_type, m_val.strip())
-            return load_memory_table()
-
-        def delete_memory(m_id: str):
-            if m_id.strip():
-                tutor_service.memory.delete_memory(m_id.strip())
-            return load_memory_table()
+            if m_val and m_val.strip():
+                tutor_service.memory.core_memory_append("student_01", m_type, m_val.strip(), authority="student_authored")
+            choices = load_active_choices()
+            return load_core_md(), gr.update(choices=choices, value=None), ""
 
         # Connect events
+        query_outputs = [
+            chatbot,
+            query_input,
+            decision_badge,
+            evidence_image,
+            timestamp_display,
+            target_timestamp_sec,
+            evidence_json,
+            session_state,
+            active_items_dropdown,
+            session_selector,
+            core_memory_md,
+        ]
+
         submit_btn.click(
             handle_query,
             inputs=[
@@ -353,15 +605,9 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
                 course_selector,
                 lecture_selector,
                 scope_selector,
+                session_state,
             ],
-            outputs=[
-                chatbot,
-                decision_badge,
-                evidence_image,
-                timestamp_display,
-                target_timestamp_sec,
-                evidence_json,
-            ],
+            outputs=query_outputs,
         )
         query_input.submit(
             handle_query,
@@ -372,15 +618,27 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
                 course_selector,
                 lecture_selector,
                 scope_selector,
+                session_state,
             ],
-            outputs=[
-                chatbot,
-                decision_badge,
-                evidence_image,
-                timestamp_display,
-                target_timestamp_sec,
-                evidence_json,
-            ],
+            outputs=query_outputs,
+        )
+
+        session_selector.change(
+            on_session_select,
+            inputs=[session_selector],
+            outputs=[chatbot, session_state, decision_badge],
+        )
+
+        new_session_btn.click(
+            on_new_session_click,
+            inputs=None,
+            outputs=[session_selector, chatbot, query_input, session_state, decision_badge],
+        )
+
+        del_session_btn.click(
+            on_delete_session_click,
+            inputs=[session_state],
+            outputs=[session_selector, chatbot, session_state, decision_badge],
         )
 
         jump_btn.click(
@@ -390,12 +648,50 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
             js=SEEK_VIDEO_JS,
         )
 
-        refresh_mem_btn.click(load_memory_table, outputs=[memory_table])
-        add_mem_btn.click(add_memory, inputs=[mem_type, mem_value], outputs=[memory_table])
-        del_btn.click(delete_memory, inputs=[del_id_input], outputs=[memory_table])
+        forget_btn.click(
+            forget_selected_memory,
+            inputs=[active_items_dropdown],
+            outputs=[core_memory_md, active_items_dropdown],
+        )
+        clear_all_mem_btn.click(
+            clear_all_memory,
+            inputs=None,
+            outputs=[core_memory_md, active_items_dropdown],
+        )
+        refresh_mem_btn.click(
+            refresh_memory,
+            inputs=None,
+            outputs=[core_memory_md, active_items_dropdown],
+        )
+        add_mem_btn.click(
+            add_memory,
+            inputs=[mem_type, mem_value],
+            outputs=[core_memory_md, active_items_dropdown, mem_value],
+        )
 
-        # Load initial memory table on launch
-        demo.load(load_memory_table, outputs=[memory_table])
+        def on_app_init():
+            dd_choices, history, active_id, mem_table, badge = handle_app_init(tutor_service, "student_01")
+            return (
+                dd_choices,
+                history,
+                active_id,
+                load_core_md(),
+                gr.update(choices=load_active_choices(), value=None),
+                badge,
+            )
+
+        # Restore active session, chat history, and memory profile on launch / refresh
+        demo.load(
+            on_app_init,
+            outputs=[
+                session_selector,
+                chatbot,
+                session_state,
+                core_memory_md,
+                active_items_dropdown,
+                decision_badge,
+            ],
+        )
 
     return demo
 
