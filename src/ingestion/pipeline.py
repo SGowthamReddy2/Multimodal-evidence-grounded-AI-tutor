@@ -361,3 +361,8 @@ class IngestionPipeline:
                 logger.error("Failed to ingest %s: %s", key, e)
                 results[key] = {"error": str(e)}
         return results
+
+    def close(self) -> None:
+        """Release storage and client resources."""
+        if hasattr(self, "storage") and self.storage:
+            self.storage.close()

@@ -4,10 +4,7 @@
 .env.*.local
 
 # Internal documentation requested to exclude
-DESIGN.md
-design.md
-SPECIFICATION.md
-specification.md
+
 
 # Virtual Environment
 .venv/
@@ -27,9 +24,6 @@ data/raw/mit-6.006/*
 
 # Local databases and vector index locks/storage
 data/fastembed_cache/*
-*.db-wal
-*.db-shm
-*.sqlite3
 
 # IDE / System files
 .idea/

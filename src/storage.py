@@ -62,8 +62,7 @@ class QdrantStorageManager:
     def __init__(self) -> None:
         """Initialise the embedded Qdrant client and ensure the collection."""
         logger.info("Opening Qdrant embedded storage at %s", QDRANT_PATH)
-        self.client = QdrantClient(path=QDRANT_PATH)
-        self._ensure_collection()
+        self.is_replica = False
         try:
             self.client = QdrantClient(path=QDRANT_PATH)
             self._ensure_collection()
@@ -71,10 +70,10 @@ class QdrantStorageManager:
             if "already accessed by another instance" in str(e):
                 logger.warning(
                     "Qdrant storage folder is locked by another process (e.g. running UI). "
-                    "Falling back to synchronized read replica 'qdrant_data_eval'."
+                    "Falling back to synchronized read replica 'qdrant_data_backup'."
                 )
                 import shutil
-                replica_path = Path(PROJECT_ROOT) / "qdrant_data_eval"
+                replica_path = Path(PROJECT_ROOT) / "qdrant_data_backup"
                 replica_path.mkdir(exist_ok=True)
                 for item in Path(QDRANT_PATH).iterdir():
                     if item.name != ".lock":
@@ -84,6 +83,7 @@ class QdrantStorageManager:
                         else:
                             shutil.copy2(item, dest)
                 self.client = QdrantClient(path=str(replica_path))
+                self.is_replica = True
                 self._ensure_collection()
             else:
                 raise
@@ -170,6 +170,13 @@ class QdrantStorageManager:
             CLIP visual embedding vectors (one per chunk, length
             ``VISUAL_DIM``).
         """
+        if getattr(self, "is_replica", False):
+            raise RuntimeError(
+                "Cannot upsert chunks into read replica 'qdrant_data_backup'. "
+                "The primary Qdrant storage ('qdrant_data') is currently locked by another process "
+                "(e.g., a running Streamlit UI). Please stop the UI process before running ingestion."
+            )
+
         points: List[PointStruct] = []
         for chunk, dense_vec, sparse_vec, visual_vec in zip(
             chunks, dense_vectors, sparse_vectors, visual_vectors
@@ -380,6 +387,12 @@ class QdrantStorageManager:
         Uses a server-side ``set_payload`` update so that no vectors need to
         be re-uploaded.
         """
+        if getattr(self, "is_replica", False):
+            raise RuntimeError(
+                "Cannot invalidate points in read replica 'qdrant_data_backup'. "
+                "The primary Qdrant storage is locked by another process."
+            )
+
         source_filter = Filter(
             must=[
                 FieldCondition(

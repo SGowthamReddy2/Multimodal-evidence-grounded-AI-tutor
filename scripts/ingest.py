@@ -61,20 +61,23 @@ def main() -> None:
     pipeline = IngestionPipeline()
     enable_vlm = not args.no_vlm
 
-    if args.lecture_dir or args.lecture:
-        raw_target = args.lecture_dir or args.lecture
-        target_dir = resolve_lecture_dir(raw_target, course_id=args.course)
-        lec_id = args.lecture or target_dir.name
-        pipeline.ingest_lecture(
-            lecture_dir=target_dir,
-            course_id=args.course,
-            lecture_id=lec_id,
-            enable_vlm=enable_vlm,
-        )
-    else:
-        # Default: auto-discover and ingest all courses & lectures
-        logger.info("Auto-discovering courses and lectures in %s...", RAW_DIR)
-        pipeline.ingest_all(base_dir=RAW_DIR, enable_vlm=enable_vlm)
+    try:
+        if args.lecture_dir or args.lecture:
+            raw_target = args.lecture_dir or args.lecture
+            target_dir = resolve_lecture_dir(raw_target, course_id=args.course)
+            lec_id = args.lecture or target_dir.name
+            pipeline.ingest_lecture(
+                lecture_dir=target_dir,
+                course_id=args.course,
+                lecture_id=lec_id,
+                enable_vlm=enable_vlm,
+            )
+        else:
+            # Default: auto-discover and ingest all courses & lectures
+            logger.info("Auto-discovering courses and lectures in %s...", RAW_DIR)
+            pipeline.ingest_all(base_dir=RAW_DIR, enable_vlm=enable_vlm)
+    finally:
+        pipeline.close()
 
 
 if __name__ == "__main__":
