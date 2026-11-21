@@ -9,7 +9,7 @@ Implements:
 
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from src.generation.abstention import (
     ABSTENTION_MESSAGE,
@@ -57,8 +57,9 @@ class TutorService:
         learner_id: str = "student_01",
         session_id: Optional[str] = None,
         config: str = "A",
-        course_id: Optional[str] = None,
-        lecture_id: Optional[str] = None,
+        course_id: Optional[Union[str, List[str]]] = None,
+        lecture_id: Optional[Union[str, List[str]]] = None,
+        include_visual: bool = True,
     ) -> Dict[str, Any]:
         """Execute end-to-end tutor query answering with multi-turn memory and intent routing."""
         active_session = self.memory.get_or_create_session(learner_id, session_id=session_id)
@@ -257,9 +258,13 @@ class TutorService:
         evidence_list = self.retriever.retrieve(
             query=retrieval_query,
             config=config,
+            include_visual=include_visual,
             course_id=course_id,
             lecture_id=lecture_id,
         )
+        if not include_visual and evidence_list:
+            # Ablation mode: strip all visual slide/keyframe chunks
+            evidence_list = [ev for ev in evidence_list if ev.modality in ("transcript", "reading")]
 
         # 6. Evaluate Abstention Policy
         decision, top_score = self.abstention_policy.evaluate(evidence_list)
@@ -439,12 +444,26 @@ class TutorService:
 
         # 10. Apply qualification prefix if needed
         final_answer = validation.sanitized_response
-        if decision == "QUALIFIED":
+        lower_ans = final_answer.lower()
+        if any(phrase in lower_ans for phrase in [
+            "cannot verify this from the approved course material",
+            "outside the scope of mit 6.006",
+            "not covered in the provided lecture",
+            "not covered in lecture",
+            "cannot be established from the provided",
+            "cannot answer based on the provided material",
+            "cannot be verified from the approved",
+            "i cannot answer",
+        ]):
+            decision = "ABSTAIN"
+        elif decision == "QUALIFIED":
             final_answer = QUALIFIED_PREFIX + final_answer
 
         # 11. Find primary media asset to navigate UI
         primary_ts = None
         primary_asset = None
+        primary_course = None
+        primary_lecture = None
         for ev in evidence_list:
             if ev.start_ms > 0 and primary_ts is None:
                 primary_ts = ev.start_ms
@@ -452,6 +471,9 @@ class TutorService:
                 primary_asset = ev.slide_asset_path
             elif ev.frame_asset_path and primary_asset is None:
                 primary_asset = ev.frame_asset_path
+            if primary_lecture is None and ev.lecture_id:
+                primary_lecture = ev.lecture_id
+                primary_course = ev.course_id
 
         badges = format_evidence_badges(evidence_list)
 
@@ -486,6 +508,8 @@ class TutorService:
             "validation": validation,
             "primary_video_timestamp_ms": primary_ts,
             "primary_asset_path": primary_asset,
+            "primary_course": primary_course,
+            "primary_lecture": primary_lecture,
             "active_profile": profile,
             "core_memory_blocks": self.memory.get_active_core_memory_blocks(learner_id),
             "executed_memory_actions": executed_actions,

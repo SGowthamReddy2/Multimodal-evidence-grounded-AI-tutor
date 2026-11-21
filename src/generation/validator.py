@@ -60,6 +60,15 @@ class CitationValidator:
         for ev_id in all_citations:
             ev = self.storage.get_evidence_by_id(ev_id)
             if not ev:
+                # Handle possible prefix variations (e.g. ev-6.006- vs ev-mit-6.006-)
+                if ev_id.startswith("ev-6.006-"):
+                    alt_id = "ev-mit-" + ev_id[3:]
+                    ev = self.storage.get_evidence_by_id(alt_id)
+                elif ev_id.startswith("ev-mit-6.006-"):
+                    alt_id = "ev-" + ev_id[7:]
+                    ev = self.storage.get_evidence_by_id(alt_id)
+
+            if not ev:
                 logger.warning("Citation validation failed: evidence_id '%s' not found in Qdrant.", ev_id)
                 invalid_citations.append(ev_id)
                 continue

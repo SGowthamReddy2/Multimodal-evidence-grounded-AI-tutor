@@ -463,19 +463,24 @@ Filter raw keyframes to extract high-information, mature blackboard and slide fr
 | **M5** | Selective Learner Memory & Governance | ✅ Complete | [`controller.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/memory/controller.py), [`engine.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/memory/engine.py), [`intent.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/intent.py) (Letta/MemGPT Core Memory Blocks, Autonomous CRUD, Multi-Session History, Student Learning Profile UI) |
 | **M6** | Calibrated Epistemic Abstention & Intent | ✅ Complete | [`abstention.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/abstention.py), [`intent.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/generation/intent.py) (Tri-state thresholds & Humane Conversational routing) |
 | **UI** | 3-Pane Interactive Web Frontend | ✅ Complete | [`app.py`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/src/ui/app.py) (Gradio 6 layout, multi-session chat, dynamic course/lecture dropdowns, video seeking, Student Learning Profile manager) |
-| **Tests** | Comprehensive Unit & Integration Suites | ✅ Complete | [`tests/`](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/tests/) (31 / 31 passing unit tests across memory, intent, UI sessions, and retrieval) |
-| **M7** | Automated Evaluation Harness | ⏸️ On Hold | Awaiting user's `data/benchmark_queries.json` |
-| **M8** | Config A vs Config B Pareto Analysis | ⏸️ On Hold | Prepared in Component 12; awaiting query dataset |
+| **Tests** | Comprehensive Unit Test Suite | ✅ Complete | [`tests/`](file:///c:/Users/reddy/OneDrive/Desktop/DAT/Multimodal-evidence-grounded-AI-tutor/tests/) (19 unit tests across memory CRUD/decay, citation validator, intent routing, and retrieval contracts) |
+| **M7** | Automated Evaluation Harness | ✅ Complete | [`evaluate.py`](file:///c:/Users/reddy/OneDrive/Desktop/DAT/Multimodal-evidence-grounded-AI-tutor/scripts/evaluate.py) (40 labelled queries in [`benchmark_queries.json`](file:///c:/Users/reddy/OneDrive/Desktop/DAT/Multimodal-evidence-grounded-AI-tutor/data/benchmark_queries.json) across all 6 required categories) |
+| **M8** | Config A vs Config B Pareto Analysis | ✅ Complete | [`evaluate.py`](file:///c:/Users/reddy/OneDrive/Desktop/DAT/Multimodal-evidence-grounded-AI-tutor/scripts/evaluate.py) (Pareto frontier analysis reporting p50/p95 latency and `--ablation` for $\Delta_{\text{visual}}$) |
 | **Comp 7**| RAG-Anything Graph Trial | ⏸️ On Hold | Kept on hold per user instruction |
 
-### Authoring the 20 Evaluation Benchmark Queries
-The evaluation harness requires 20 labelled prospective queries authored in `data/benchmark_queries.json`:
-* **5 Text-Only Retrieval**
-* **5 Visual-Required Cases** ($\Delta_{\text{visual}} \ge 0.40$)
-* **3 Multi-Context Reasoning**
-* **3 Off-Corpus Abstention**
-* **2 Stale-Source Invalidation**
-* **2 Adversarial Prompt Injection**
+### Running Unit Tests & Evaluation Benchmark
 
-*(See Section 6.1 in [DESIGN.md](file:///c:/Users/Vivek/Documents/IITH/Sem%201/DAT/Project%20-%20Multimodal%20AI%20Tutor/DESIGN.md#L513-L577) for schema details and worked examples).*
+```powershell
+# 1. Run offline unit tests
+.venv\Scripts\python -m unittest discover tests
+
+# 2. Run automated RAG evaluation (Config A Quality-Optimized)
+.venv\Scripts\python scripts/evaluate.py -c A
+
+# 3. Run dual-profile Pareto comparison (Config A vs Config B)
+.venv\Scripts\python scripts/evaluate.py -c both
+
+# 4. Run visual necessity ablation study (measuring Δ_visual = Acc_multimodal - Acc_transcript_only)
+.venv\Scripts\python scripts/evaluate.py -c A --ablation
+```
 

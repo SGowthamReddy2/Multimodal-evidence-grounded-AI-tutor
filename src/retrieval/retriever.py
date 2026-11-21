@@ -6,8 +6,11 @@ Implements the multi-stage retrieval architecture:
 3. Cross-Encoder reranker (ms-marco-MiniLM-L-6-v2) for Config A
 """
 
+import os
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
 import logging
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from sentence_transformers import CrossEncoder
 
@@ -45,8 +48,8 @@ class HybridRetriever:
         top_k: int = FINAL_TOP_K,
         config: str = "A",  # 'A' = Quality-Optimized, 'B' = Speed-Optimized
         include_visual: bool = True,
-        course_id: Optional[str] = None,
-        lecture_id: Optional[str] = None,
+        course_id: Optional[Union[str, List[str]]] = None,
+        lecture_id: Optional[Union[str, List[str]]] = None,
     ) -> List[RetrievedEvidence]:
         """Retrieve top-K evidence chunks matching the student query with optional course/lecture scoping."""
         is_config_a = config.upper() == "A"
@@ -83,8 +86,14 @@ class HybridRetriever:
                 pairs.append((query, passage))
 
             scores = self.reranker.predict(pairs)
+            import math
             for c, s in zip(candidates, scores):
                 c.score = float(s)
+                # Calibrate cross-encoder logit into [0.0, 1.0] probability matching abstention thresholds
+                try:
+                    c.score = float(1.0 / (1.0 + math.exp(-float(s) - 0.4)))
+                except OverflowError:
+                    c.score = 1.0 if float(s) > 0 else 0.0
 
             # Sort descending by cross-encoder score
             candidates.sort(key=lambda x: x.score, reverse=True)

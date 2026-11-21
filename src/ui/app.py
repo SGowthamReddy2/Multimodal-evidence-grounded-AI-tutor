@@ -63,8 +63,20 @@ def format_timestamp_min_sec(ts_ms: Optional[int]) -> Tuple[str, float]:
     return f"{minutes:02d}:{seconds:02d} ({minutes}m {seconds:02d}s)", total_sec
 
 
-def find_lecture_video(course_id: str, lecture_id: str) -> Optional[str]:
+def find_lecture_video(course_id: Optional[str], lecture_id: Optional[str]) -> Optional[str]:
     """Locate the MP4 video file for a specific course and lecture."""
+    if not course_id or course_id == "All Courses":
+        course_id = DEFAULT_COURSE_ID
+
+    if not lecture_id or lecture_id == "All Lectures":
+        p = RAW_DIR / course_id
+        if p.exists():
+            vids = list(p.rglob("*.mp4"))
+            if vids:
+                return str(vids[0])
+        all_vids = list(RAW_DIR.rglob("*.mp4"))
+        return str(all_vids[0]) if all_vids else None
+
     # 1. Check hierarchical directory: data/raw/<course_id>/<lecture_id>/*.mp4
     p1 = RAW_DIR / course_id / lecture_id
     if p1.exists():
@@ -79,7 +91,16 @@ def find_lecture_video(course_id: str, lecture_id: str) -> Optional[str]:
         if vids:
             return str(vids[0])
 
-    # 3. Fallback: check all mp4 in RAW_DIR
+    # 3. Search for lecture substring in any mp4 in RAW_DIR
+    lec_clean = lecture_id.replace("lecture-", "").replace("lec", "").strip()
+    try:
+        lec_int = int(lec_clean)
+        for mp4 in RAW_DIR.rglob("*.mp4"):
+            if f"Lecture_{lec_int}" in mp4.name or f"Lecture_{lec_int:02d}" in mp4.name:
+                return str(mp4)
+    except Exception:
+        pass
+
     all_vids = list(RAW_DIR.rglob("*.mp4"))
     if all_vids:
         return str(all_vids[0])
@@ -248,14 +269,16 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
     """Construct the Gradio Blocks web application."""
     tutor_service = service or TutorService()
 
+    ALL_COURSES = "All Courses"
+    ALL_LECTURES = "All Lectures"
+
     # Discover available courses and lectures
     available_courses_map = tutor_service.list_available_courses_and_lectures()
     course_choices = sorted(list(available_courses_map.keys())) or [DEFAULT_COURSE_ID]
     default_course = course_choices[0]
-    lecture_choices = available_courses_map.get(default_course, ["lecture-03"])
-    default_lecture = lecture_choices[0] if lecture_choices else "lecture-03"
+    all_known_lectures = sorted(list({lec for lecs in available_courses_map.values() for lec in lecs})) or ["lecture-03", "lecture-04", "lecture-06", "lecture-07"]
 
-    initial_video_path = find_lecture_video(default_course, default_lecture)
+    initial_video_path = find_lecture_video(default_course, all_known_lectures[0])
 
     with gr.Blocks(
         title="Multimodal Evidence-Grounded AI Tutor",
@@ -268,25 +291,33 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
             """
         )
 
-        # Multi-Course & Multi-Lecture Scope Bar
-        with gr.Row():
-            course_selector = gr.Dropdown(
-                choices=course_choices,
-                value=default_course,
-                label="📚 Course",
-                scale=4,
-            )
-            lecture_selector = gr.Dropdown(
-                choices=lecture_choices,
-                value=default_lecture,
-                label="🎥 Lecture",
-                scale=4,
-            )
-            scope_selector = gr.Radio(
-                choices=["Current Lecture", "Entire Course", "All Courses"],
-                value="Current Lecture",
-                label="🔍 Retrieval Scope",
-                scale=4,
+        # Multi-Course & Multi-Lecture Scope Bar with Checkboxes
+        with gr.Group():
+            with gr.Row():
+                with gr.Column(scale=6):
+                    with gr.Row():
+                        course_selector = gr.Dropdown(
+                            choices=[ALL_COURSES] + course_choices,
+                            value=[ALL_COURSES],
+                            multiselect=True,
+                            label="📚 Courses (Check options in dropdown)",
+                            info="Select one or more courses, or 'All Courses'",
+                            scale=9,
+                        )
+                        all_courses_btn = gr.Button("All Courses", scale=3, size="sm", variant="secondary")
+                with gr.Column(scale=6):
+                    with gr.Row():
+                        lecture_selector = gr.Dropdown(
+                            choices=[ALL_LECTURES] + all_known_lectures,
+                            value=[ALL_LECTURES],
+                            multiselect=True,
+                            label="🎥 Lectures (Check options in dropdown)",
+                            info="Select one or more lectures, or 'All Lectures'",
+                            scale=9,
+                        )
+                        all_lectures_btn = gr.Button("All Lectures", scale=3, size="sm", variant="secondary")
+            scope_badge = gr.Markdown(
+                "🌐 **Retrieval Scope**: **All Courses** | **All Lectures** *(Searching across all available course materials)*"
             )
 
         with gr.Row():
@@ -412,28 +443,134 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
                         add_mem_btn = gr.Button("➕ Save to Profile", variant="primary")
 
         # --------------------------------------------------------------
-        # Reactive Event Handlers
+        # Scope and Dynamic Selection Event Handlers
         # --------------------------------------------------------------
 
-        def on_course_change(selected_course: str):
-            mapping = tutor_service.list_available_courses_and_lectures()
-            lectures = mapping.get(selected_course, ["lecture-03"])
-            first_lec = lectures[0] if lectures else "lecture-03"
-            vid = find_lecture_video(selected_course, first_lec)
-            return gr.update(choices=lectures, value=first_lec), vid
+        def format_scope_badge_text(courses: Optional[List[str]], lectures: Optional[List[str]]) -> str:
+            courses = courses or []
+            lectures = lectures or []
+            is_all_c = not courses or ALL_COURSES in courses
+            is_all_l = not lectures or ALL_LECTURES in lectures
 
-        def on_lecture_change(selected_course: str, selected_lecture: str):
-            return find_lecture_video(selected_course, selected_lecture)
+            if is_all_c and is_all_l:
+                return "🌐 **Retrieval Scope**: **All Courses** | **All Lectures** *(Searching across all available course materials)*"
+
+            clean_c = [c for c in courses if c != ALL_COURSES]
+            clean_l = [l for l in lectures if l != ALL_LECTURES]
+
+            if is_all_c:
+                c_str = "**All Courses**"
+            elif len(clean_c) == 1:
+                c_str = f"Course: `{clean_c[0]}`"
+            else:
+                c_str = f"Courses: `{', '.join(clean_c)}`"
+
+            if is_all_l:
+                l_str = "**All Lectures**"
+            elif len(clean_l) == 1:
+                l_str = f"Lecture: `{clean_l[0]}`"
+            else:
+                l_str = f"Lectures: `{', '.join(clean_l)}` ({len(clean_l)} selected)"
+
+            return f"🔍 **Retrieval Scope**: {c_str} | {l_str}"
+
+        def on_all_courses_btn_click(current_lectures: List[str]):
+            mapping = tutor_service.list_available_courses_and_lectures()
+            all_c = sorted(list(mapping.keys())) or [DEFAULT_COURSE_ID]
+            all_l = sorted(list({l for lecs in mapping.values() for l in lecs})) or ["lecture-03"]
+
+            new_c = [ALL_COURSES]
+            lec_choices = [ALL_LECTURES] + all_l
+            current_lectures = current_lectures or [ALL_LECTURES]
+            target_l = current_lectures[0] if current_lectures[0] != ALL_LECTURES else all_l[0]
+            vid = find_lecture_video(all_c[0], target_l)
+            badge = format_scope_badge_text(new_c, current_lectures)
+            return gr.update(value=new_c), gr.update(choices=lec_choices), vid, badge
+
+        def on_all_lectures_btn_click(selected_courses: List[str]):
+            mapping = tutor_service.list_available_courses_and_lectures()
+            all_c = sorted(list(mapping.keys())) or [DEFAULT_COURSE_ID]
+
+            selected_courses = selected_courses or []
+            specific_c = [c for c in selected_courses if c != ALL_COURSES]
+            target_c = specific_c[0] if specific_c else all_c[0]
+
+            new_l = [ALL_LECTURES]
+            first_lec = mapping.get(target_c, ["lecture-03"])[0]
+            vid = find_lecture_video(target_c, first_lec)
+            badge = format_scope_badge_text(selected_courses, new_l)
+            return gr.update(value=new_l), vid, badge
+
+        def on_course_change(selected_courses: List[str], current_lectures: List[str]):
+            mapping = tutor_service.list_available_courses_and_lectures()
+            all_c = sorted(list(mapping.keys())) or [DEFAULT_COURSE_ID]
+            all_l = sorted(list({l for lecs in mapping.values() for l in lecs})) or ["lecture-03"]
+
+            selected_courses = selected_courses or []
+            specific_c = [c for c in selected_courses if c != ALL_COURSES]
+
+            if not specific_c:
+                valid_lecture_choices = [ALL_LECTURES] + all_l
+                target_c = all_c[0]
+            else:
+                sub_l = set()
+                for c in specific_c:
+                    sub_l.update(mapping.get(c, []))
+                valid_lecture_choices = [ALL_LECTURES] + sorted(list(sub_l))
+                target_c = specific_c[0]
+
+            current_lectures = current_lectures or [ALL_LECTURES]
+            if ALL_LECTURES in current_lectures:
+                updated_lectures = [ALL_LECTURES]
+            else:
+                updated_lectures = [l for l in current_lectures if l in valid_lecture_choices]
+                if not updated_lectures:
+                    updated_lectures = [ALL_LECTURES]
+
+            target_l = updated_lectures[0] if updated_lectures[0] != ALL_LECTURES else mapping.get(target_c, ["lecture-03"])[0]
+            vid = find_lecture_video(target_c, target_l)
+
+            badge = format_scope_badge_text(selected_courses, updated_lectures)
+            return gr.update(choices=valid_lecture_choices, value=updated_lectures), vid, badge
+
+        def on_lecture_change(selected_lectures: List[str], selected_courses: List[str]):
+            mapping = tutor_service.list_available_courses_and_lectures()
+            all_c = sorted(list(mapping.keys())) or [DEFAULT_COURSE_ID]
+
+            selected_courses = selected_courses or []
+            specific_c = [c for c in selected_courses if c != ALL_COURSES]
+            target_c = specific_c[0] if specific_c else all_c[0]
+
+            selected_lectures = selected_lectures or []
+            specific_l = [l for l in selected_lectures if l != ALL_LECTURES]
+            target_l = specific_l[0] if specific_l else mapping.get(target_c, ["lecture-03"])[0]
+            vid = find_lecture_video(target_c, target_l)
+
+            badge = format_scope_badge_text(selected_courses, selected_lectures)
+            return vid, badge
+
+        all_courses_btn.click(
+            on_all_courses_btn_click,
+            inputs=[lecture_selector],
+            outputs=[course_selector, lecture_selector, video_player, scope_badge],
+        )
+
+        all_lectures_btn.click(
+            on_all_lectures_btn_click,
+            inputs=[course_selector],
+            outputs=[lecture_selector, video_player, scope_badge],
+        )
 
         course_selector.change(
             on_course_change,
-            inputs=[course_selector],
-            outputs=[lecture_selector, video_player],
+            inputs=[course_selector, lecture_selector],
+            outputs=[lecture_selector, video_player, scope_badge],
         )
+
         lecture_selector.change(
             on_lecture_change,
-            inputs=[course_selector, lecture_selector],
-            outputs=[video_player],
+            inputs=[lecture_selector, course_selector],
+            outputs=[video_player, scope_badge],
         )
 
         def on_app_init():
@@ -452,9 +589,8 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
             user_query: str,
             chat_history: List[Dict],
             config_choice: str,
-            course_choice: str,
-            lecture_choice: str,
-            scope_choice: str,
+            selected_courses: List[str],
+            selected_lectures: List[str],
             current_session_id: Optional[str],
         ):
             if not user_query.strip():
@@ -471,6 +607,7 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
                     gr.update(choices=load_active_choices(), value=None),
                     gr.Dropdown(choices=choices, value=current_session_id),
                     load_core_md(),
+                    gr.skip(),
                 )
 
             config_code = "A" if "Config A" in config_choice else "B"
@@ -478,21 +615,35 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
             chat_history.append({"role": "user", "content": user_query})
 
             # Determine course/lecture filtering scope
-            target_course = course_choice if scope_choice in ("Current Lecture", "Entire Course") else None
-            target_lecture = lecture_choice if scope_choice == "Current Lecture" else None
+            mapping = tutor_service.list_available_courses_and_lectures()
+            all_c = sorted(list(mapping.keys())) or [DEFAULT_COURSE_ID]
+
+            # If "All Courses" selected or empty or all individual courses selected -> None (search all)
+            if not selected_courses or ALL_COURSES in selected_courses:
+                target_courses = None
+            else:
+                clean_c = [c for c in selected_courses if c != ALL_COURSES]
+                target_courses = None if set(clean_c) == set(all_c) else clean_c
+
+            # If "All Lectures" selected or empty -> None (search all lectures in scope)
+            if not selected_lectures or ALL_LECTURES in selected_lectures:
+                target_lectures = None
+            else:
+                clean_l = [l for l in selected_lectures if l != ALL_LECTURES]
+                target_lectures = clean_l if clean_l else None
 
             # Ensure we have a valid active session
             if not current_session_id:
                 current_session_id = tutor_service.memory.get_or_create_session("student_01")
 
-            # Call TutorService with session_id
+            # Call TutorService with session_id and multi-course/lecture scope
             res = tutor_service.answer_query(
                 query=user_query,
                 learner_id="student_01",
                 session_id=current_session_id,
                 config=config_code,
-                course_id=target_course,
-                lecture_id=target_lecture,
+                course_id=target_courses,
+                lecture_id=target_lectures,
             )
 
             bot_reply = res["answer"]
@@ -538,6 +689,12 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
                 asset_path_obj = Path(asset_path).resolve()
                 asset_path = str(asset_path_obj) if asset_path_obj.exists() else None
 
+            # Video update if cited lecture has video
+            ev_lec = res.get("primary_lecture")
+            ev_c = res.get("primary_course") or DEFAULT_COURSE_ID
+            cited_vid = find_lecture_video(ev_c, ev_lec) if ev_lec else None
+            vid_out = cited_vid if cited_vid else gr.skip()
+
             return (
                 chat_history,
                 "",  # Clear query input box
@@ -550,6 +707,7 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
                 gr.update(choices=load_active_choices(), value=None),
                 gr.Dropdown(choices=choices, value=active_session),
                 load_core_md(),
+                vid_out,
             )
 
         def load_active_choices():
@@ -594,32 +752,26 @@ def build_app(service: Optional[TutorService] = None) -> gr.Blocks:
             active_items_dropdown,
             session_selector,
             core_memory_md,
+            video_player,
+        ]
+
+        query_inputs = [
+            query_input,
+            chatbot,
+            config_selector,
+            course_selector,
+            lecture_selector,
+            session_state,
         ]
 
         submit_btn.click(
             handle_query,
-            inputs=[
-                query_input,
-                chatbot,
-                config_selector,
-                course_selector,
-                lecture_selector,
-                scope_selector,
-                session_state,
-            ],
+            inputs=query_inputs,
             outputs=query_outputs,
         )
         query_input.submit(
             handle_query,
-            inputs=[
-                query_input,
-                chatbot,
-                config_selector,
-                course_selector,
-                lecture_selector,
-                scope_selector,
-                session_state,
-            ],
+            inputs=query_inputs,
             outputs=query_outputs,
         )
 

@@ -10,6 +10,8 @@ from pathlib import Path
 
 # Disable remote cost map fetches in LiteLLM to ensure fast offline/sandboxed startup
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 # ---------------------------------------------------------------------------
 # Project root & data directories
@@ -120,7 +122,8 @@ MEMORY_CONFIDENCE_HALF_LIFE_DAYS = 30
 MEMORY_MAX_RECORD_LENGTH = 180     # Max characters for a memory value
 MEMORY_INJECTION_PATTERNS = [
     "[INST]", "SYSTEM:", "<|im_start|>", "<|im_end|>",
-    "ignore all previous", "you are now", "forget everything",
+    "ignore all previous", "ignore all instructions", "ignore all",
+    "you are now", "forget everything", "system prompt",
 ]
 
 # ---------------------------------------------------------------------------

@@ -141,7 +141,7 @@ class LearnerMemoryController:
         for pattern in MEMORY_INJECTION_PATTERNS:
             if pattern.lower() in val.lower():
                 logger.warning("Sanitizing injection attempt in memory value: '%s'", val)
-                val = val.replace(pattern, "[FILTERED]")
+                val = re.sub(re.escape(pattern), "[FILTERED]", val, flags=re.IGNORECASE)
 
         if len(val) > MEMORY_MAX_RECORD_LENGTH:
             val = val[:MEMORY_MAX_RECORD_LENGTH]
