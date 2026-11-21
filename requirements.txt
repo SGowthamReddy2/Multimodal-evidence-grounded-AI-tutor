@@ -1,0 +1,34 @@
+# Multimodal AI Tutor Dependencies
+
+# LLM, VLM & Gateway
+litellm>=1.50.0
+groq>=1.7.0
+fastapi>=0.115.0
+gradio>=6.0.0
+pydantic>=2.10.0
+python-dotenv>=1.0.0
+httpx>=0.27.0
+
+# Vector Database & Retrieval (Qdrant & Embeddings)
+qdrant-client>=1.12.0
+portalocker>=2.8.0
+fastembed>=0.4.0
+onnxruntime>=1.18.0
+sentence-transformers>=3.3.0
+torch>=2.2.0
+
+# Document & Video Ingestion (LEARNet TIB & Stratified CLIP)
+pymupdf>=1.25.0
+opencv-python>=4.10.0
+numpy>=1.26.0
+pillow>=10.0.0
+webvtt-py>=0.4.6
+faster-whisper>=1.0.0
+
+# Storage & Utilities (Letta Working Memory & Logging)
+aiosqlite>=0.20.0
+loguru>=0.7.0
+tqdm>=4.66.0
+
+# Testing & Quality Assurance
+pytest>=8.0.0

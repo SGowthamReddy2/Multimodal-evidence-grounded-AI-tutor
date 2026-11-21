@@ -1,9 +1,8 @@
 # 📊 Automated RAG Benchmark Evaluation Report
 
-**Generated At:** 2026-11-14 21:39:13  
-**Total Queries Evaluated:** 42 (Equally distributed across 7 categories, 6 queries each)  
-**Overall Pass Rate (Config A):** 85.7% (36/42)  
-**Overall Pass Rate (Config B):** 78.6% (33/42)  
+**Generated At:** 2026-11-21 23:52:05  
+**Total Queries Evaluated:** 42  
+**Overall Pass Rate (Config A):** 73.81%  
 
 ---
 
@@ -13,24 +12,24 @@
 |---|---|---|---|---|:---:|
 | **Citation Validity** | M3, NFR-01 | Fabricated Citation Rate | 0.0% | 0.0% | ✅ PASS |
 | **Citation Grounding** | M3, NFR-02 | Citation Precision | >= 90% | 100.0% | ✅ PASS |
-| **Abstention Accuracy**| M6, NFR-04 | Off-Corpus Abstention | >= 95% | 100.0% | ✅ PASS |
-| **Semantic Alignment** | M1, M2, M4 | Cosine Similarity (BGE) | >= 0.70 | 0.809 | ✅ PASS |
-| **Response Latency (p50)** | M8, NFR-07 | Median Query Latency | <= 3500 ms | 6420 ms | ⚠️ WARN |
-| **Response Latency (p95)** | M8, NFR-07 | Tail Query Latency | <= 5000 ms | 8150 ms | ⚠️ WARN |
+| **Abstention Accuracy**| M6, NFR-04 | Off-Corpus Abstention | >= 95% | 78.6% | ⚠️ WARN |
+| **Semantic Alignment** | M1, M2, M4 | Cosine Similarity (BGE) | >= 0.70 | 0.6390 | ⚠️ WARN |
+| **Response Latency (p50)** | M8, NFR-07 | Median Query Latency | <= 3500 ms | 2395 ms | ✅ PASS |
+| **Response Latency (p95)** | M8, NFR-07 | Tail Query Latency | <= 5000 ms | 4405 ms | ✅ PASS |
 
 ---
 
 ## 2. Category Breakdown Performance
 
-| Category | Queries | Passed (A) | Pass Rate (A) | Passed (B) | Pass Rate (B) | Avg Latency (A) | Avg Similarity (A) |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `text_only` | 6 | 6 | 100.0% | 5 | 83.3% | 6420 ms | 0.842 |
-| `visual_required` | 6 | 4 | 66.7% | 4 | 66.7% | 6910 ms | 0.795 |
-| `multi_context` | 6 | 6 | 100.0% | 5 | 83.3% | 7180 ms | 0.812 |
-| `context_assembly` | 6 | 6 | 100.0% | 6 | 100.0% | 5890 ms | 0.835 |
-| `llm_generation` | 6 | 5 | 83.3% | 5 | 83.3% | 7450 ms | 0.804 |
-| `validation_gate` | 6 | 6 | 100.0% | 5 | 83.3% | 3820 ms | 1.000 |
-| `frontend_presentation` | 6 | 3 | 50.0% | 3 | 50.0% | 5950 ms | 0.780 |
+| Category | Queries | Passed | Pass Rate | Avg Latency | Avg Similarity |
+|---|:---:|:---:|:---:|:---:|:---:|
+| `text_only` | 6 | 5 | 83.3% | 3443.5 ms | 0.6864 |
+| `visual_required` | 6 | 3 | 50.0% | 2337.1 ms | 0.4936 |
+| `multi_context` | 6 | 5 | 83.3% | 3143.2 ms | 0.6257 |
+| `context_assembly` | 6 | 6 | 100.0% | 2894.3 ms | 0.5652 |
+| `llm_generation` | 6 | 4 | 66.7% | 2185.3 ms | 0.5022 |
+| `validation_gate` | 6 | 6 | 100.0% | 2452.6 ms | 1.0 |
+| `frontend_presentation` | 6 | 2 | 33.3% | 2546.6 ms | 0.6001 |
 
 ---
 
@@ -39,61 +38,59 @@
 > **Config A (Quality-Optimized)**: Multi-channel RRF + Cross-Encoder Reranking (`ms-marco-MiniLM-L-6-v2`)  
 > **Config B (Speed-Optimized)**: Multi-channel RRF directly (bypassing Cross-Encoder reranker)
 
-| Trade-off Dimension | Config A (Quality) | Config B (Speed) | Delta (A vs B) | Note |
-|---|---|---|---|---|
-| **Benchmark Pass Rate** | **85.7%** (33/42) | **78.6%** (31/42) | **+7.1%** | Config A outperforms Config B |
-| **Average Semantic Similarity** | **0.809** | **0.671** | **+0.138** | Higher grounding in lecture evidence |
-| **Token F1 Alignment** | **0.312** | **0.185** | **+0.127** | Superior lexical overlap with ground truth |
-| **Off-Corpus Refusal Accuracy** | **100.0%** (6/6) | **83.3%** (5/6) | **+16.7%** | Cross-encoder eliminates false positives |
-| **Zero Hallucinated Citations** | **100.0%** | **100.0%** | 0.0% | Pre-display validation gate guarantees 0 hallucinations |
-| **Latency p50 (Median)** | 6,420 ms | 890 ms | +5,530 ms | Config B is ~7.2x faster |
-| **Latency p95 (Tail)** | 8,150 ms | 1,820 ms | +6,330 ms | Config B provides low-latency interactive responses |
+| Trade-off Dimension | Config A (Quality) | Config B (Speed) | Delta (A vs B) |
+|---|---|---|---|
+| **Pass Rate** | 73.81% | 85.71% | -11.9% |
+| **Average Similarity** | 0.6390 | 0.4840 | +0.1550 |
+| **Token F1** | 0.2401 | 0.1204 | +0.1197 |
+| **Latency p50 (Median)** | 2395.3 ms | 367.4 ms | +2027.9 ms |
+| **Latency p95 (Tail)** | 4404.8 ms | 1659.1 ms | +2745.7 ms |
 
 ---
 
-## 4. Benchmark Query Summary by Category
+## 4. Query-by-Query Execution Details
 
-| ID | Category | Modality | Ground Truth Source | Config A Status | Config B Status |
-|---|---|---|---|:---:|:---:|
-| `TC_TXT_01` | `text_only` | Text/Audio | `Lec 3 Sorting Slide 2 / Video transcript` | ✅ PASS | ✅ PASS |
-| `TC_TXT_02` | `text_only` | Text/Audio | `Lec 4 Hashing Slide 2 / Video transcript` | ✅ PASS | ✅ PASS |
-| `TC_TXT_03` | `text_only` | Text/Audio | `Lec 6 Binary trees transcript with timestamps.txt` | ✅ PASS | ❌ FAIL |
-| `TC_TXT_04` | `text_only` | Text/Audio | `Lec 6 Binary trees transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_TXT_05` | `text_only` | Text/Audio | `Lec 7 Binary tree and avl notes transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_TXT_06` | `text_only` | Text/Audio | `Lec 7 Binary tree and avl notes transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_VIS_01` | `visual_required` | Visual (Slide/Video) | `Lec 6 Binary tree notes.pdf` | ❌ FAIL | ❌ FAIL |
-| `TC_VIS_02` | `visual_required` | Visual (Slide/Video) | `Lec 4 Hashing Slide 4` | ✅ PASS | ✅ PASS |
-| `TC_VIS_03` | `visual_required` | Visual (Slide/Video) | `Lec 7 AVL Trees Slide 3 / Video Board` | ✅ PASS | ✅ PASS |
-| `TC_VIS_04` | `visual_required` | Visual (Slide/Video) | `Lec 7 Binary tree and avl notes.pdf` | ✅ PASS | ✅ PASS |
-| `TC_VIS_05` | `visual_required` | Visual (Slide/Video) | `Lec 6 Binary tree notes.pdf` | ❌ FAIL | ❌ FAIL |
-| `TC_VIS_06` | `visual_required` | Visual (Slide/Video) | `Lec 3 Sorting Slide 5` | ✅ PASS | ✅ PASS |
-| `TC_CTX_01` | `multi_context` | Text/Audio | `Lec 4 Hashing and Lec 6 Binary Trees` | ✅ PASS | ✅ PASS |
-| `TC_CTX_02` | `multi_context` | Text/Audio | `Lec 7 Binary tree and avl notes transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_CTX_03` | `multi_context` | Text/Audio | `Lec 7 Binary tree and avl notes transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_CTX_04` | `multi_context` | Text/Audio | `Lec 6 and Lec 7` | ✅ PASS | ✅ PASS |
-| `TC_CTX_05` | `multi_context` | Text/Audio | `Lec 3 Sorting and Lec 6 Binary Trees` | ✅ PASS | ✅ PASS |
-| `TC_CTX_06` | `multi_context` | Text/Audio | `Lec 4 Hashing and Lec 7 AVL Trees` | ✅ PASS | ✅ PASS |
-| `TC_ASM_01` | `context_assembly` | Text/Audio | `Lec 3 Sorting Slide 5 / Video transcript` | ✅ PASS | ✅ PASS |
-| `TC_ASM_02` | `context_assembly` | Text/Audio | `Lec 3 Sorting Slide 5 / Video transcript` | ✅ PASS | ✅ PASS |
-| `TC_ASM_03` | `context_assembly` | Text/Audio | `Lec 6 Binary trees transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_ASM_04` | `context_assembly` | Text/Audio | `Lec 6 Binary trees transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_ASM_05` | `context_assembly` | Text/Audio | `Lec 7 Binary tree and avl notes transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_ASM_06` | `context_assembly` | Text/Audio | `Lec 6 Binary trees transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_GEN_01` | `llm_generation` | Text/Audio | `Lec 4 Hashing Slide 4 / Video transcript` | ✅ PASS | ✅ PASS |
-| `TC_GEN_02` | `llm_generation` | Text/Audio | `Lec 7 Binary tree and avl notes transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_GEN_03` | `llm_generation` | Text/Audio | `Lec 7 Binary tree and avl notes transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_GEN_04` | `llm_generation` | Text/Audio | `Lec 7 Binary tree and avl notes transcript with timestamps.txt` | ✅ PASS | ✅ PASS |
-| `TC_GEN_05` | `llm_generation` | Text/Audio | `Lec 3 Sorting Slide 5` | ✅ PASS | ✅ PASS |
-| `TC_GEN_06` | `llm_generation` | Text/Audio | `Lec 4 Hashing Slide 3 / Video transcript` | ❌ FAIL | ✅ PASS |
-| `TC_VAL_01` | `validation_gate` | Text/Audio | `None` | ✅ PASS | ❌ FAIL |
-| `TC_VAL_02` | `validation_gate` | Text/Audio | `None` | ✅ PASS | ✅ PASS |
-| `TC_VAL_03` | `validation_gate` | Text/Audio | `None` | ✅ PASS | ✅ PASS |
-| `TC_VAL_04` | `validation_gate` | Text/Audio | `None` | ✅ PASS | ✅ PASS |
-| `TC_VAL_05` | `validation_gate` | Text/Audio | `None` | ✅ PASS | ✅ PASS |
-| `TC_VAL_06` | `validation_gate` | Text/Audio | `None` | ✅ PASS | ✅ PASS |
-| `TC_FNT_01` | `frontend_presentation` | Text/Audio | `Lec 3 Sorting Video` | ❌ FAIL | ✅ PASS |
-| `TC_FNT_02` | `frontend_presentation` | Visual (Slide/Video) | `Lec 6 Binary Trees Slide 2` | ✅ PASS | ✅ PASS |
-| `TC_FNT_03` | `frontend_presentation` | Text/Audio | `Lec 4 Hashing Video` | ❌ FAIL | ❌ FAIL |
-| `TC_FNT_04` | `frontend_presentation` | Visual (Slide/Video) | `Lec 3 Sorting Slide 1` | ✅ PASS | ✅ PASS |
-| `TC_FNT_05` | `frontend_presentation` | Visual (Slide/Video) | `Lec 7 AVL Trees Slide 2 / Video` | ❌ FAIL | ❌ FAIL |
-| `TC_FNT_06` | `frontend_presentation` | Visual (Slide/Video) | `Lec 6 Binary tree notes.pdf` | ✅ PASS | ❌ FAIL |
+| ID | Category | Decision | Latency | Sim | Citations Valid | Status |
+|---|---|:---:|:---:|:---:|:---:|:---:|
+| `TC_TXT_01` | `text_only` | `FULL` | 4787 ms | 0.906 | 100% | ✅ |
+| `TC_TXT_02` | `text_only` | `FULL` | 3873 ms | 0.868 | 100% | ✅ |
+| `TC_TXT_03` | `text_only` | `QUALIFIED` | 4432 ms | 0.766 | 100% | ❌ |
+| `TC_TXT_04` | `text_only` | `FULL` | 2967 ms | 0.819 | 100% | ✅ |
+| `TC_TXT_05` | `text_only` | `FULL` | 2146 ms | 0.394 | 100% | ✅ |
+| `TC_TXT_06` | `text_only` | `FULL` | 2455 ms | 0.364 | 100% | ✅ |
+| `TC_VIS_01` | `visual_required` | `ABSTAIN` | 2572 ms | 0.607 | 100% | ❌ |
+| `TC_VIS_02` | `visual_required` | `FULL` | 2295 ms | 0.439 | 100% | ✅ |
+| `TC_VIS_03` | `visual_required` | `FULL` | 2283 ms | 0.404 | 100% | ❌ |
+| `TC_VIS_04` | `visual_required` | `FULL` | 2359 ms | 0.476 | 100% | ✅ |
+| `TC_VIS_05` | `visual_required` | `ABSTAIN` | 2040 ms | 0.590 | 100% | ❌ |
+| `TC_VIS_06` | `visual_required` | `FULL` | 2473 ms | 0.447 | 100% | ✅ |
+| `TC_CTX_01` | `multi_context` | `FULL` | 5143 ms | 0.825 | 100% | ✅ |
+| `TC_CTX_02` | `multi_context` | `FULL` | 3833 ms | 0.917 | 100% | ✅ |
+| `TC_CTX_03` | `multi_context` | `ABSTAIN` | 2304 ms | 0.668 | 100% | ❌ |
+| `TC_CTX_04` | `multi_context` | `FULL` | 2735 ms | 0.383 | 100% | ✅ |
+| `TC_CTX_05` | `multi_context` | `QUALIFIED` | 2450 ms | 0.468 | 100% | ✅ |
+| `TC_CTX_06` | `multi_context` | `FULL` | 2394 ms | 0.493 | 100% | ✅ |
+| `TC_ASM_01` | `context_assembly` | `FULL` | 2464 ms | 0.426 | 100% | ✅ |
+| `TC_ASM_02` | `context_assembly` | `FULL` | 2397 ms | 0.418 | 100% | ✅ |
+| `TC_ASM_03` | `context_assembly` | `FULL` | 3879 ms | 0.884 | 100% | ✅ |
+| `TC_ASM_04` | `context_assembly` | `FULL` | 3738 ms | 0.879 | 100% | ✅ |
+| `TC_ASM_05` | `context_assembly` | `FULL` | 2663 ms | 0.456 | 100% | ✅ |
+| `TC_ASM_06` | `context_assembly` | `FULL` | 2224 ms | 0.328 | 100% | ✅ |
+| `TC_GEN_01` | `llm_generation` | `FULL` | 2575 ms | 0.510 | 100% | ✅ |
+| `TC_GEN_02` | `llm_generation` | `QUALIFIED` | 2318 ms | 0.446 | 100% | ✅ |
+| `TC_GEN_03` | `llm_generation` | `FULL` | 2123 ms | 0.357 | 100% | ✅ |
+| `TC_GEN_04` | `llm_generation` | `FULL` | 2239 ms | 0.421 | 100% | ✅ |
+| `TC_GEN_05` | `llm_generation` | `ABSTAIN` | 1987 ms | 0.588 | 100% | ❌ |
+| `TC_GEN_06` | `llm_generation` | `ABSTAIN` | 1870 ms | 0.692 | 100% | ❌ |
+| `TC_VAL_01` | `validation_gate` | `ABSTAIN` | 2236 ms | 1.000 | 100% | ✅ |
+| `TC_VAL_02` | `validation_gate` | `ABSTAIN` | 1959 ms | 1.000 | 100% | ✅ |
+| `TC_VAL_03` | `validation_gate` | `ABSTAIN` | 1948 ms | 1.000 | 100% | ✅ |
+| `TC_VAL_04` | `validation_gate` | `QUALIFIED` | 3114 ms | 1.000 | 100% | ✅ |
+| `TC_VAL_05` | `validation_gate` | `ABSTAIN` | 2065 ms | 1.000 | 100% | ✅ |
+| `TC_VAL_06` | `validation_gate` | `ABSTAIN` | 3393 ms | 1.000 | 100% | ✅ |
+| `TC_FNT_01` | `frontend_presentation` | `ABSTAIN` | 2102 ms | 0.650 | 100% | ❌ |
+| `TC_FNT_02` | `frontend_presentation` | `FULL` | 2275 ms | 0.372 | 100% | ✅ |
+| `TC_FNT_03` | `frontend_presentation` | `ABSTAIN` | 2183 ms | 0.650 | 100% | ❌ |
+| `TC_FNT_04` | `frontend_presentation` | `QUALIFIED` | 3275 ms | 0.785 | 100% | ✅ |
+| `TC_FNT_05` | `frontend_presentation` | `ABSTAIN` | 2131 ms | 0.674 | 100% | ❌ |
+| `TC_FNT_06` | `frontend_presentation` | `ABSTAIN` | 3313 ms | 0.469 | 100% | ❌ |
