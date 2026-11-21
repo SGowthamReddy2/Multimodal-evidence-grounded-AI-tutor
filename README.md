@@ -51,8 +51,8 @@ In compliance with the **CS5903 Handover & Reproducibility Guidelines**, all for
 
 | Deliverable | Repository Path | Description |
 |---|---|---|
-| **Project Final Report** | [`Documentation/Project_Report_Final.docx`](Documentation/Project_Report.docx) | Comprehensive final technical report covering milestones M1–M8, architecture, empirical evaluations, Pareto frontiers, and limitations. |
-| **Architecture Decision Records (ADRs)** | [`Documentation/Architecture_Decision_Records.docx`](Documentation/Architecture_Decision_Record.docx) | 18 Architecture Decision Records (ADR-001 to ADR-018) detailing all structural, methodology, and design choices. |
+| **Project Final Report** | [`Documentation/Project_Report.docx`](Documentation/Project_Report.docx) | Comprehensive final technical report covering milestones M1–M8, architecture, empirical evaluations, Pareto frontiers, and limitations. |
+| **Architecture Decision Records (ADRs)** | [`Documentation/Architecture_Decision_Record.docx`](Documentation/Architecture_Decision_Record.docx) | 18 Architecture Decision Records (ADR-001 to ADR-018) detailing all structural, methodology, and design choices. |
 | **Weekly Progress Reports** | [`Documentation/W0_Report.pdf`](Documentation/W0_Report.pdf), [`Documentation/W1_Report.pdf`](Documentation/W1_Report.pdf), [`Documentation/Week2_Technical Methodology.pdf`](Documentation/Week2_Technical%20Methodology.pdf) | Weekly milestone deliverables and methodology evolution. |
 | **System Specification** | [`SPECIFICATION.md`](SPECIFICATION.md) | Spec-Driven Development (SDD) contract, acceptance criteria, and system requirements. |
 | **Technical Design Document** | [`DESIGN.md`](DESIGN.md) | In-depth engineering design, data schemas, mathematical formulations, and API contracts. |
@@ -643,6 +643,6 @@ Raw evaluation outputs and Markdown summaries are written to [`evaluation_result
 
 ### 👨‍🏫 Verification & Audit Contact
 For questions regarding the evaluation benchmark, reproduction scripts, or architecture decisions, refer to:
-* **Final Report**: [`Documentation/Project_Report_Final.docx`](Documentation/Project_Report.docx)
-* **Architecture Decision Records**: [`Documentation/Architecture_Decision_Records.docx`](Documentation/Architecture_Decision_Record.docx)
+* **Final Report**: [`Documentation/Project_Report.docx`](Documentation/Project_Report.docx)
+* **Architecture Decision Records**: [`Documentation/Architecture_Decision_Record.docx`](Documentation/Architecture_Decision_Record.docx)
 * **Weekly Submissions**: [`Documentation/W0_Report.pdf`](Documentation/W0_Report.pdf), [`Documentation/W1_Report.pdf`](Documentation/W1_Report.pdf), [`Documentation/Week2_Technical Methodology.pdf`](Documentation/Week2_Technical%20Methodology.pdf)
