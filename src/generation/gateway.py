@@ -40,7 +40,12 @@ litellm.telemetry = False
 logger = logging.getLogger(__name__)
 
 
-def parse_rate_limit_reset(exception_or_headers: Any, default_seconds: float = 60.0) -> float:
+class RateLimitSkipException(Exception):
+    """Raised when rate limit sleeping duration is >= 60 seconds to skip the query."""
+    pass
+
+
+def parse_rate_limit_reset(exception_or_headers: Any, default_seconds: float = 10.0) -> float:
     """Extract reset duration in seconds from 429 response headers or error messages."""
     headers = getattr(exception_or_headers, "headers", None) or {}
     if hasattr(exception_or_headers, "response") and hasattr(exception_or_headers.response, "headers"):
@@ -67,12 +72,28 @@ def parse_rate_limit_reset(exception_or_headers: Any, default_seconds: float = 6
             except (ValueError, TypeError):
                 pass
 
-    # Parse error text if header wasn't available (e.g. 'try again in 12.5s')
+    # Parse error text if header wasn't available (e.g. 'try again in 12.5s', 'retry after 5s')
     err_str = str(exception_or_headers)
-    match = re.search(r"try again in (\d+(\.\d+)?)s", err_str, re.IGNORECASE)
-    if match:
+    patterns = [
+        r"try again in (\d+(?:\.\d+)?)\s*s",
+        r"retry after (\d+(?:\.\d+)?)\s*s",
+        r"try again in (\d+(?:\.\d+)?)\s*seconds?",
+        r"rate limit.*wait(?:ing)?\s*(\d+(?:\.\d+)?)\s*s",
+    ]
+    for pat in patterns:
+        match = re.search(pat, err_str, re.IGNORECASE)
+        if match:
+            try:
+                return max(1.0, float(match.group(1)))
+            except ValueError:
+                pass
+
+    m_match = re.search(r"(\d+)\s*m(?:inutes?)?\s*(\d+(?:\.\d+)?)?\s*s?", err_str, re.IGNORECASE)
+    if m_match:
         try:
-            return max(1.0, float(match.group(1)))
+            mins = float(m_match.group(1))
+            secs = float(m_match.group(2) or 0.0)
+            return max(1.0, mins * 60.0 + secs)
         except ValueError:
             pass
 
@@ -222,15 +243,49 @@ class LiteLLMGateway:
 
             return content
 
-        try:
-            return _call_with_continuation(active_model)
-        except Exception as e:
-            err_msg = str(e).lower()
-            if "rate_limit" in err_msg or "429" in err_msg or "rate limit" in err_msg:
-                fallback_model = self._record_rate_limit(task_type, active_model, e)
-                logger.info("Retrying text completion with fallback model: %s", fallback_model)
-                return _call_with_continuation(fallback_model)
-            raise
+        max_retries = 3
+        current_model = active_model
+
+        for attempt in range(max_retries + 1):
+            try:
+                return _call_with_continuation(current_model)
+            except Exception as e:
+                err_msg = str(e).lower()
+                is_rate_limit = any(term in err_msg for term in [
+                    "rate_limit", "429", "rate limit", "ratelimit", "tokens per minute", "requests per minute", "tpm", "rpm"
+                ])
+                if is_rate_limit:
+                    reset_secs = parse_rate_limit_reset(e, default_seconds=12.0)
+                    wait_time = max(2.0, reset_secs + 1.0)
+                    if wait_time >= 60.0:
+                        logger.warning(
+                            "Model '%s' hit rate limit with wait time %.1fs >= 60s. Skipping query as per policy.",
+                            current_model,
+                            wait_time,
+                        )
+                        raise RateLimitSkipException(f"Rate limit wait time {wait_time:.1f}s >= 60s")
+
+                    if attempt < max_retries:
+                        logger.warning(
+                            "Model '%s' hit rate limit (attempt %d/%d). Employing wait methodology: sleeping %.1fs for token bucket reset...",
+                            current_model,
+                            attempt + 1,
+                            max_retries,
+                            wait_time,
+                        )
+                        time.sleep(wait_time)
+
+                        # On later attempts, also rotate to next fallback model if available
+                        if attempt >= 1:
+                            fallback_model = self._record_rate_limit(task_type, current_model, e)
+                            logger.info("Switching to fallback model for retry: %s", fallback_model)
+                            current_model = fallback_model
+                        continue
+                    else:
+                        logger.error("Exceeded max retries (%d) on rate limits for model '%s': %s", max_retries, current_model, e)
+                        raise
+                else:
+                    raise
 
     def caption_image(
         self,

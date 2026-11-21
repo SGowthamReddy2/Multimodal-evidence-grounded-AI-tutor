@@ -22,7 +22,7 @@ from src.config import (
     PROJECT_ROOT,
     SPEED_LLM_MODEL,
 )
-from src.generation.gateway import LiteLLMGateway
+from src.generation.gateway import LiteLLMGateway, RateLimitSkipException
 
 # Load environment variables from .env if present
 load_dotenv(PROJECT_ROOT / ".env")
@@ -143,6 +143,8 @@ class GroundedGenerator:
                 temperature=0.1,
             )
         except Exception as e:
+            if isinstance(e, RateLimitSkipException):
+                raise
             logger.exception("LLM generation error: %s", e)
             return f"⚠️ Generation error: {e}"
 
@@ -200,6 +202,8 @@ class GroundedGenerator:
                 temperature=0.3,
             )
         except Exception as e:
+            if isinstance(e, RateLimitSkipException):
+                raise
             logger.exception("Conversational LLM generation error: %s", e)
             return f"Hello! I am your Multimodal AI Tutor for algorithms. How can I help you today? (Note: {e})"
 

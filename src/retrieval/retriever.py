@@ -77,25 +77,48 @@ class HybridRetriever:
             logger.info("No candidates returned from Qdrant.")
             return []
 
-        # 3. Rerank if Config A
+        # Store initial multi-vector RRF scores for hybrid calibration
+        for c in candidates:
+            setattr(c, "rrf_score", float(c.score))
+
+        # 3. Rerank if Config A (Quality-focused Cross-Encoder pipeline)
         if use_reranker and len(candidates) > 1:
             pairs = []
             for c in candidates:
-                # Combine transcript span or visual caption as passage
-                passage = c.transcript_span or c.visual_caption or ""
+                # Build rich multimodal passage incorporating slide page, transcript, and visual diagram captions
+                passage_parts = []
+                if c.page_number:
+                    passage_parts.append(f"Slide/Page {c.page_number}")
+                if c.transcript_span:
+                    passage_parts.append(c.transcript_span.strip())
+                if c.visual_caption and c.visual_caption.strip() != (c.transcript_span or "").strip():
+                    passage_parts.append(f"Visual Diagram: {c.visual_caption.strip()}")
+                passage = " | ".join(passage_parts) if passage_parts else (c.transcript_span or c.visual_caption or "")
                 pairs.append((query, passage))
 
             scores = self.reranker.predict(pairs)
             import math
-            for c, s in zip(candidates, scores):
-                c.score = float(s)
-                # Calibrate cross-encoder logit into [0.0, 1.0] probability matching abstention thresholds
-                try:
-                    c.score = float(1.0 / (1.0 + math.exp(-float(s) - 0.4)))
-                except OverflowError:
-                    c.score = 1.0 if float(s) > 0 else 0.0
+            q_lower = query.lower()
+            is_visual_q = any(w in q_lower for w in ["slide", "diagram", "table", "chalkboard", "drawn", "visual", "figure", "board"])
 
-            # Sort descending by cross-encoder score
+            for c, s in zip(candidates, scores):
+                raw_s = float(s)
+                # Calibrate ms-marco cross-encoder logit into [0.0, 1.0] probability matching epistemic thresholds:
+                # - Highly relevant (s >= 0.0): score in [0.69, 0.99] -> State: FULL
+                # - Borderline / hedged (-1.0 <= s < 0.0): score in [0.45, 0.69) -> State: QUALIFIED
+                # - Irrelevant / off-corpus (s < -1.0): score < 0.45 -> State: ABSTAIN
+                try:
+                    calibrated_score = float(1.0 / (1.0 + math.exp(-(raw_s + 0.8))))
+                except OverflowError:
+                    calibrated_score = 1.0 if raw_s > 0 else 0.0
+
+                # Multimodal visual query boost (+0.08) for slide/diagram evidence on visual queries
+                if is_visual_q and c.modality in ["slide", "diagram", "keyframe"]:
+                    calibrated_score = min(1.0, calibrated_score + 0.08)
+
+                c.score = float(calibrated_score)
+
+            # Sort descending by quality-calibrated score
             candidates.sort(key=lambda x: x.score, reverse=True)
 
         final_results = candidates[:top_k]

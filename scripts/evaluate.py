@@ -164,14 +164,65 @@ class EvaluationRunner:
 
         t0 = time.perf_counter()
         session_id = f"eval-assembly-{config}" if category == "context_assembly" else f"eval-{query_id}-{config}"
-        res = self.service.answer_query(
-            query=query_text,
-            session_id=session_id,
-            learner_id="benchmark_evaluator",
-            config=config,
-            course_id=course_id,
-            lecture_id=target_lec,
-        )
+
+        # Execute query with wait methodology if Groq hits API rate limit (429)
+        max_retries = 3
+        res = None
+        for attempt in range(max_retries + 1):
+            try:
+                res = self.service.answer_query(
+                    query=query_text,
+                    session_id=session_id,
+                    learner_id="benchmark_evaluator",
+                    config=config,
+                    course_id=course_id,
+                    lecture_id=target_lec,
+                )
+                break
+            except Exception as exc:
+                from src.generation.gateway import RateLimitSkipException, parse_rate_limit_reset
+                if isinstance(exc, RateLimitSkipException):
+                    raise exc
+
+                err_text = str(exc).lower()
+                is_rate_limit = any(term in err_text for term in [
+                    "rate_limit", "429", "rate limit", "ratelimit", "tokens per minute", "requests per minute", "tpm", "rpm"
+                ])
+                if is_rate_limit:
+                    wait_secs = parse_rate_limit_reset(exc, default_seconds=12.0)
+                    if wait_secs >= 60.0:
+                        logger.warning(
+                            "Rate limit wait time %.1fs >= 60s for query %s. Skipping query as per policy.",
+                            wait_secs,
+                            query_id,
+                        )
+                        raise RateLimitSkipException(f"Rate limit wait time {wait_secs:.1f}s >= 60s")
+
+                    sleep_secs = max(2.0, wait_secs + 1.0)
+                    if sleep_secs >= 60.0:
+                        logger.warning(
+                            "Rate limit sleep time %.1fs >= 60s for query %s. Skipping query as per policy.",
+                            sleep_secs,
+                            query_id,
+                        )
+                        raise RateLimitSkipException(f"Rate limit sleep time {sleep_secs:.1f}s >= 60s")
+
+                    if attempt < max_retries:
+                        logger.warning(
+                            "Rate limit encountered on query %s (attempt %d/%d). Employing wait methodology: sleeping %.1fs...",
+                            query_id,
+                            attempt + 1,
+                            max_retries,
+                            sleep_secs,
+                        )
+                        time.sleep(sleep_secs)
+                        continue
+                    else:
+                        logger.error("Query %s failed after %d retries due to rate limits: %s", query_id, max_retries, exc)
+                        raise
+                else:
+                    raise
+
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         answer = res["answer"]
@@ -307,34 +358,52 @@ class EvaluationRunner:
         )
 
         results: List[Dict[str, Any]] = []
+        skipped_count = 0
+        from src.generation.gateway import RateLimitSkipException
+
         for idx, item in enumerate(queries, 1):
             q_id = item.get("query_id", f"Q{idx}")
             cat = item.get("category", "general")
             print(f"[{idx}/{len(queries)}] Running {q_id} ({cat})...", end="", flush=True)
 
-            score_record = self.evaluate_query(
-                item=item,
-                config=config,
-                course_id=course_id,
-                lecture_id=lecture_id,
-            )
-            results.append(score_record)
+            try:
+                score_record = self.evaluate_query(
+                    item=item,
+                    config=config,
+                    course_id=course_id,
+                    lecture_id=lecture_id,
+                )
+                results.append(score_record)
 
-            status = "✅ PASS" if score_record["overall_pass"] else "❌ FAIL"
-            print(f" -> {status} ({score_record['latency_ms']:.0f}ms, decision={score_record['decision']})")
+                status = "✅ PASS" if score_record["overall_pass"] else "❌ FAIL"
+                print(f" -> {status} ({score_record['latency_ms']:.0f}ms, decision={score_record['decision']})")
+            except RateLimitSkipException as skip_err:
+                skipped_count += 1
+                logger.warning("Query %s skipped due to rate limit policy: %s", q_id, skip_err)
+                print(f" -> ⏭️ SKIPPED ({skip_err})")
+                continue
 
             if delay_s > 0 and idx < len(queries):
                 time.sleep(delay_s)
 
         # Aggregate Statistics
-        summary = self.aggregate_metrics(results, config=config)
+        summary = self.aggregate_metrics(results, config=config, skipped_count=skipped_count)
         return {"summary": summary, "results": results}
 
-    def aggregate_metrics(self, results: List[Dict[str, Any]], config: str) -> Dict[str, Any]:
+    def aggregate_metrics(
+        self,
+        results: List[Dict[str, Any]],
+        config: str,
+        skipped_count: int = 0,
+    ) -> Dict[str, Any]:
         """Compute aggregate metrics and breakdown across categories."""
         total = len(results)
         if total == 0:
-            return {}
+            return {
+                "config": config,
+                "total_queries": 0,
+                "skipped_queries": skipped_count,
+            }
 
         latencies = [r["latency_ms"] for r in results]
         p50 = float(np.percentile(latencies, 50))
@@ -370,6 +439,7 @@ class EvaluationRunner:
         return {
             "config": config,
             "total_queries": total,
+            "skipped_queries": skipped_count,
             "passed_queries": passed_count,
             "overall_pass_rate": round((passed_count / total) * 100.0, 2),
             "abstention_accuracy": round(abstention_acc * 100.0, 2),
@@ -394,11 +464,12 @@ def generate_markdown_report(
     results_a = eval_data["results"]
 
     cfg_label = summary_a.get("config", "A")
+    skipped_str = f"  \n**Skipped Queries (Rate Limit >= 60s):** {summary_a['skipped_queries']}" if summary_a.get("skipped_queries", 0) > 0 else ""
     lines = [
         "# 📊 Automated RAG Benchmark Evaluation Report",
         "",
         f"**Generated At:** {time.strftime('%Y-%m-%d %H:%M:%S')}  ",
-        f"**Total Queries Evaluated:** {summary_a['total_queries']}  ",
+        f"**Total Queries Evaluated:** {summary_a['total_queries']}{skipped_str}  ",
         f"**Overall Pass Rate (Config {cfg_label}):** {summary_a['overall_pass_rate']}%  ",
         "",
         "---",
@@ -522,8 +593,8 @@ def main() -> None:
         "--delay",
         "-d",
         type=float,
-        default=0.5,
-        help="Delay in seconds between successive queries to respect API rate limits.",
+        default=1.5,
+        help="Delay in seconds between successive queries to respect API rate limits (default: 1.5s).",
     )
     args = parser.parse_args()
 

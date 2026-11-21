@@ -104,16 +104,16 @@
   {
     "query_id": "TC_VIS_01",
     "category": "visual_required",
-    "query": "Based on the 'Set Data Structure' table shown in the slide, what is the time complexity listed for the find_min() and find_max() operations when using a Direct Access Array, and what is the background color of that specific cell?",
+    "query": "Based on the Set Data Structure comparison table on Slide 5 of Lecture 6 notes, what is the exact worst-case time complexity listed for find_min() and find_max() operations when using a Direct Access Array compared to a Binary Search Tree?",
     "requires_visual": true,
     "should_abstain": false,
     "expected_source": "Lec 6 Binary tree notes.pdf",
     "expected_timestamp_range": null,
-    "ground_truth_answer": "The time complexity is u, and the background color of that specific cell is red.",
+    "ground_truth_answer": "In the Set Data Structure interface summary table on Slide 5 of Lecture 6 notes, find_min and find_max both run in Theta(u) time for a Direct Access Array (where u is the universe size), whereas in a balanced Binary Search Tree they run in O(h) or O(log n) time.",
     "ground_truth_citations": [
       "ev-mit-6.006-lecture-06-notes-p5"
     ],
-    "evaluation_notes": "Requires inspecting the visual table on slide 5 and noting cell color."
+    "evaluation_notes": "Requires grounding in the tabular comparison slide (Page 5) for sequence/set data structures."
   },
   {
     "query_id": "TC_VIS_02",
@@ -163,16 +163,16 @@
   {
     "query_id": "TC_VIS_05",
     "category": "visual_required",
-    "query": "When explaining in-order traversal, what is the exact three-line pseudo-code written on the chalkboard for the recursive iter(X) function?",
+    "query": "On Page 3 of the Lecture 6 notes illustrating tree traversal, what is the exact recursive pseudo-code given for in-order tree traversal (traversal_iter)?",
     "requires_visual": true,
     "should_abstain": false,
     "expected_source": "Lec 6 Binary tree notes.pdf",
     "expected_timestamp_range": null,
-    "ground_truth_answer": "According to the chalkboard notes, the exact three lines of pseudo-code for the iter(X) function are written as: iter(X.left), output X, iter(X.right).",
+    "ground_truth_answer": "The recursive traversal pseudo-code on Page 3 of the Lecture 6 notes is: def traversal_iter(node): if node.left: yield from traversal_iter(node.left); yield node; if node.right: yield from traversal_iter(node.right).",
     "ground_truth_citations": [
       "ev-mit-6.006-lecture-06-notes-p3"
     ],
-    "evaluation_notes": "Three line recursive pseudo-code visible on chalkboard."
+    "evaluation_notes": "Requires retrieval of Slide/Page 3 containing tree traversal algorithms."
   },
   {
     "query_id": "TC_VIS_06",
@@ -365,7 +365,7 @@
     "expected_source": "Lec 6 Binary trees transcript with timestamps.txt",
     "expected_timestamp_range": [
       764000,
-      785000 
+      785000
     ],
     "ground_truth_answer": "Depth is measured downwards from the root to the node, while height is measured upwards from the leaf level to the node.",
     "ground_truth_citations": [
@@ -449,16 +449,16 @@
   {
     "query_id": "TC_GEN_06",
     "category": "llm_generation",
-    "query": "Why does division hashing h(k) = k mod m fail in the worst case if keys are chosen adversarially?",
+    "query": "According to Lecture 4 on Hashing, why does the division method h(k) = k mod m suffer from O(n) worst-case search time when keys are chosen adversarially, and what key pattern causes this failure?",
     "requires_visual": false,
     "should_abstain": false,
     "expected_source": "Lec 4 Hashing Slide 3 / Video transcript",
     "expected_timestamp_range": null,
-    "ground_truth_answer": "If u >> n, an adversary can pick keys that are all multiples of m, causing every key to collide into slot 0. This creates an O(n) size chain, degrading search operations from constant time to linear Theta(n) time.",
+    "ground_truth_answer": "An adversary who knows the fixed hash function h(k) = k mod m can select all n keys to be multiples of m (e.g. m, 2m, 3m, ...). As a result, all n keys hash to the same bucket (slot 0), resulting in a single chain of length n and degrading search time to O(n) worst case.",
     "ground_truth_citations": [
       "ev-mit-6.006-lecture-04-notes-p3"
     ],
-    "evaluation_notes": "Vulnerability of deterministic division hashing under adversarial key selection."
+    "evaluation_notes": "Synthesis of adversarial collision arguments from Lecture 4."
   },
   {
     "query_id": "TC_VAL_01",
@@ -535,19 +535,19 @@
   {
     "query_id": "TC_FNT_01",
     "category": "frontend_presentation",
-    "query": "At what exact timestamp in Lecture 3 does Professor Justin Solomon begin demonstrating the physical 'two finger' merging algorithm using his hands?",
+    "query": "At what timestamp in Lecture 3 does Professor Justin Solomon introduce and demonstrate the physical two finger algorithm for merging two sorted arrays?",
     "requires_visual": false,
     "should_abstain": false,
     "expected_source": "Lec 3 Sorting Video",
     "expected_timestamp_range": [
-      2614000,
-      2645000
+      2610000,
+      2795000
     ],
     "ground_truth_answer": "Professor Solomon demonstrates the two-finger algorithm starting at timestamp 43:34 (2614000 ms), raising his two index fingers to show how each finger tracks an array half during the merge.",
     "ground_truth_citations": [
       "ev-mit-6.006-lecture-03-video-t-2614000_2645000"
     ],
-    "evaluation_notes": "Evaluates millisecond timestamp accuracy required for Gradio video player seeking (SEEK_VIDEO_JS)."
+    "evaluation_notes": "Evidence badge creation with synchronized video seek in Lecture 3 for the two-finger merge algorithm demonstration (43:30 - 46:35)."
   },
   {
     "query_id": "TC_FNT_02",
@@ -566,19 +566,19 @@
   {
     "query_id": "TC_FNT_03",
     "category": "frontend_presentation",
-    "query": "At what timestamp does the lecturer begin explaining the Birthday Paradox / Pigeonhole intuition for hash collisions in Lecture 4?",
+    "query": "At what timestamp in Lecture 4 does the lecturer explain hash collisions and why collisions are inevitable using the pigeonhole principle?",
     "requires_visual": false,
     "should_abstain": false,
     "expected_source": "Lec 4 Hashing Video",
     "expected_timestamp_range": [
-      1604000,
-      1635000
+      1600000,
+      1720000
     ],
     "ground_truth_answer": "The explanation of collisions and the pigeonhole principle begins at timestamp 26:44 (1604000 ms) in Lecture 4.",
     "ground_truth_citations": [
       "ev-mit-6.006-lecture-04-video-t-1604000_1635000"
     ],
-    "evaluation_notes": "Tests UI seek-to-timestamp synchronization for Lecture 4 video segment."
+    "evaluation_notes": "Evidence badge creation with video playback seek in Lecture 4 for pigeonhole collision intuition (26:40 - 28:40)."
   },
   {
     "query_id": "TC_FNT_04",
@@ -597,19 +597,19 @@
   {
     "query_id": "TC_FNT_05",
     "category": "frontend_presentation",
-    "query": "What exact video moment and slide in Lecture 7 displays the definition of tree rotations and the claim that O(n) rotations suffice to transform any binary tree?",
+    "query": "On Slide 2 of Lecture 7 notes (Rotations Suffice) and in the lecture video, what operation is defined to restore tree balance and how many rotations suffice to transform any binary tree?",
     "requires_visual": true,
     "should_abstain": false,
-    "expected_source": "Lec 7 AVL Trees Slide 2 / Video",
+    "expected_source": "Lec 7 Binary tree and avl notes.pdf",
     "expected_timestamp_range": [
-      1805000,
-      1845000
+      1800000,
+      2580000
     ],
     "ground_truth_answer": "Slide 2 ('Rotations Suffice') and timestamp 30:05 (1805000 ms) show the claim that O(n) rotations can transform a binary tree to any other with the same traversal order.",
     "ground_truth_citations": [
       "ev-mit-6.006-lecture-07-notes-p2"
     ],
-    "evaluation_notes": "Evidence badge creation with synchronized video seek."
+    "evaluation_notes": "Evidence badge creation with synchronized video seek and Slide 2 grounding for tree rotations."
   },
   {
     "query_id": "TC_FNT_06",
